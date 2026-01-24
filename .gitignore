@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv/
+
+# OS
+.DS_Store
+
+# Radiance generated files (large, can be regenerated)
+edificio/octrees/*.oct
+edificio/matrices/dc/*.mtx
+edificio/results/dc/*.ill
+edificio/images/*.png
+
+# Keep directory structure
+!edificio/octrees/.gitkeep
+!edificio/matrices/dc/.gitkeep
+!edificio/results/dc/.gitkeep
+!edificio/images/.gitkeep
+
+# Quarto generated
+report/*.html
+report/*_files/
+report/.quarto/
+
+# Tutorial files (external)
+radTutorialFiles-master/
+
+# IDE
+.idea/
+.vscode/
+*.swp

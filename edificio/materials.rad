@@ -1,0 +1,42 @@
+# Radiance Materials - Edificio Main Room
+# All materials used in geometry (cleaned and organized)
+
+# FLOORS
+void plastic PISO-CONCRETO-PULIDOIER
+0
+0
+5 0.65 0.65 0.65 0.2 0
+
+void plastic PISO-PASILLOIER
+0
+0
+5 0.36 0.36 0.36 0.2 0
+
+# WALLS & STRUCTURE
+void plastic LadrilloIER
+0
+0
+5 0.55 0.55 0.55 0 0
+
+void plastic Material-de-bloque-de-componente-del-proyecto
+0
+0
+5 0.4 0.4 0.4 0 0
+
+# CEILING
+void plastic CONCRETO-ARMADOIER
+0
+0
+5 0.1 0.1 0.1 0 0
+
+# METAL ELEMENTS
+void metal AluminiumIER
+0
+0
+5 0.68 0.68 0.68 0 0
+
+# GLAZING
+void glass Acristalamiento-exterior-del-proyecto
+0
+0
+3 0.88 0.88 0.88

@@ -1,0 +1,672 @@
+---
+title: "Radiance Daylighting Simulation Validation Report"
+subtitle: "Comparison of Simulated vs Experimental Illuminance"
+author: "Radiance Simulation Study"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+   
+```{python}
+#| label: setup
+#| include: false
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from datetime import datetime
+from IPython.display import display, Markdown
+
+# Set plot style
+plt.rcParams['figure.dpi'] = 100
+plt.rcParams['savefig.dpi'] = 100
+```
+
+## Introduction
+
+This report presents the validation of Radiance daylighting simulations against experimental illuminance measurements. The study compares simulated illuminance values with field measurements taken at 63 sensor points (7 lines × 9 sensors) for two representative days:
+
+- **June 26**: Summer conditions (high sun angle)
+- **November 20**: Fall/winter conditions (low sun angle)
+
+**Location**: Temixco, Mexico (18.85°N, 99.14°W)
+
+{{< include MATERIALS.md >}}
+
+---
+
+## Data Loading
+
+```{python}
+#| label: load-data
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+def parse_annual_ill_file(filepath):
+    """Parse the annual.ill file, skip header lines"""
+    with open(filepath, 'r') as f:
+        lines = f.readlines()
+
+    skip_keywords = ['#', 'NCOMP', 'NROWS', 'NCOLS', 'FORMAT', 'SOFTWARE',
+                     'CAPDATE', 'GMT', 'rmtxop', 'dctimestep', 'Applied',
+                     'Transposed', 'LATLONG']
+
+    data_start = 0
+    for i, line in enumerate(lines):
+        is_header = False
+        for keyword in skip_keywords:
+            if line.startswith(keyword):
+                is_header = True
+                break
+        if not is_header and line.strip():
+            data_start = i
+            break
+
+    data = []
+    for line in lines[data_start:]:
+        if line.strip():
+            try:
+                values = [float(x) for x in line.split()]
+                if len(values) > 0:
+                    data.append(values)
+            except ValueError:
+                continue
+
+    return np.array(data)
+
+def datetime_to_hour_of_year(month, day, hour, year=2024):
+    """Convert date/time to hour of year index (0-8759)"""
+    start_of_year = datetime(year, 1, 1, 0, 0, 0)
+    target_dt = datetime(year, month, day, hour, 0, 0)
+    delta = target_dt - start_of_year
+    hour_of_year = int(delta.total_seconds() / 3600)
+    return max(0, hour_of_year - 1)
+
+def load_experimental_data(base_path, hours, reverse_odd_hours=True):
+    """Load experimental data from CSV files"""
+    cols_map = ['I1N', 'I2N', 'I3N', 'I4N', 'I1S', 'I2S', 'I3S', 'I4S', 'I5S']
+    dataframes = []
+
+    for hour in hours:
+        f = f"{base_path}/{hour:02d}h.csv"
+        df = pd.read_csv(f)
+        if reverse_odd_hours and hour % 2 == 1:
+            df = df[::-1].reset_index(drop=True)
+        dataframes.append(df[cols_map] * 1000)  # Convert klux to lux
+
+    return dataframes
+
+def load_radiance_data(ill_file, month, day, hours):
+    """Load radiance data for specific date and hours"""
+    radiance_data = parse_annual_ill_file(ill_file)
+    NX, NY = 7, 9
+    cols_map = ['I1N', 'I2N', 'I3N', 'I4N', 'I1S', 'I2S', 'I3S', 'I4S', 'I5S']
+
+    dataframes = []
+    for hour in hours:
+        hour_idx = datetime_to_hour_of_year(month, day, hour)
+        illum_1d = radiance_data[hour_idx, :]
+        illum_2d = illum_1d.reshape(NX, NY)
+        # Flip rows (to match experimental row order) and columns (N to S)
+        illum_matched = illum_2d[::-1, ::-1]
+        df = pd.DataFrame(illum_matched, columns=cols_map)
+        dataframes.append(df)
+
+    return dataframes
+
+# Load data
+hours = [9, 10, 11, 12, 13, 14, 15, 16, 17]
+ill_file = "../edificio/results/dc/annual_validation.ill"
+
+# June 26
+exp_jun26 = load_experimental_data("../data/experimental/005_26Junio", hours)
+rad_jun26 = load_radiance_data(ill_file, 6, 26, hours)
+
+# November 20
+exp_nov20 = load_experimental_data("../data/experimental/006_20Nov", hours)
+rad_nov20 = load_radiance_data(ill_file, 11, 20, hours)
+
+print("Data loaded successfully:")
+print(f"  - June 26: {len(exp_jun26)} hours of experimental and radiance data")
+print(f"  - November 20: {len(exp_nov20)} hours of experimental and radiance data")
+```
+
+## Sensor Grid Layout
+
+The validation uses a 7×9 grid of 63 sensor points at work plane height (0.75m):
+
+```{python}
+#| label: grid-layout
+#| fig-cap: "Sensor grid layout (7 lines × 9 sensors)"
+#| fig-width: 7
+#| fig-height: 5
+
+fig, ax = plt.subplots(figsize=(7, 5))
+
+# Grid parameters
+distancia_muro_norte = 0.51
+distancia_entre_sensores = 1.08
+distancia_pizarron = 0.71
+distancia_entre_lineas = 1.08
+
+x_positions = [distancia_muro_norte + i * distancia_entre_sensores for i in range(9)]
+y_positions = [distancia_pizarron + i * distancia_entre_lineas for i in range(7)]
+
+# Plot sensor positions
+for i, y in enumerate(y_positions):
+    for j, x in enumerate(x_positions):
+        point_num = i * 9 + j + 1
+        ax.plot(x, y, 'ko', markersize=8)
+        ax.annotate(f'{point_num}', (x, y), textcoords="offset points",
+                   xytext=(0, 8), ha='center', fontsize=7)
+
+# Room outline
+room_width = 9.66
+room_height = 7.66
+ax.plot([0, room_width, room_width, 0, 0],
+        [0, 0, room_height, room_height, 0], 'b-', linewidth=2)
+
+# Labels
+ax.set_xlabel('X [m] - North to South')
+ax.set_ylabel('Y [m] - East (pizarron) to West')
+ax.set_title('Sensor Grid Layout (63 points)')
+ax.set_aspect('equal')
+ax.grid(True, alpha=0.3)
+
+# Add wall labels
+ax.text(room_width/2, -0.3, 'NORTH WALL (windows)', ha='center', fontsize=10)
+ax.text(room_width/2, room_height+0.3, 'SOUTH WALL (windows)', ha='center', fontsize=10)
+ax.text(-0.3, room_height/2, 'EAST\n(pizarron)', ha='center', va='center', fontsize=9, rotation=90)
+ax.text(room_width+0.3, room_height/2, 'WEST\n(back)', ha='center', va='center', fontsize=9, rotation=90)
+
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+# June 26 Results
+
+## Radiance Simulation - June 26
+
+```{python}
+#| label: fig-radiance-jun26
+#| fig-cap: "Radiance simulation results for June 26 (hours 9:00-17:00)"
+#| fig-width: 10
+#| fig-height: 8
+
+cols_map = ['I1N', 'I2N', 'I3N', 'I4N', 'I1S', 'I2S', 'I3S', 'I4S', 'I5S']
+niveles = [0, 299, 500, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 10000]
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z = rad_jun26[i].values.astype(float)
+
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+
+plt.suptitle('Radiance Simulation - June 26', fontsize=12, fontweight='bold', y=0.98)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+## Experimental Measurements - June 26
+
+```{python}
+#| label: fig-experimental-jun26
+#| fig-cap: "Experimental measurements for June 26 (hours 9:00-17:00)"
+#| fig-width: 10
+#| fig-height: 8
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z = exp_jun26[i].values.astype(float)
+
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+
+plt.suptitle('Experimental Measurements - June 26', fontsize=12, fontweight='bold', y=0.98)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+## Error (Experimental - Radiance) - June 26
+
+```{python}
+#| label: fig-error-jun26
+#| fig-cap: "Error (Experimental - Radiance) for June 26 (hours 9:00-17:00)"
+#| fig-width: 10
+#| fig-height: 8
+
+# Error levels (symmetric around 0)
+niveles_error = [-5000, -3000, -2000, -1000, -500, 0, 500, 1000, 2000, 3000, 5000]
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z_error = exp_jun26[i].values.astype(float) - rad_jun26[i].values.astype(float)
+
+    contour_filled = ax.contourf(X, Y, Z_error, cmap='RdBu_r', alpha=0.7, levels=niveles_error, extend='both')
+    contour = ax.contour(X, Y, Z_error, colors='black', levels=niveles_error, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+    ax.contour(X, Y, Z_error, colors='black', levels=[0], linewidths=1.5)
+
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Error (Exp - Rad) [lux]')
+
+plt.suptitle('Error: Experimental - Radiance | June 26', fontsize=12, fontweight='bold', y=0.98)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+## Hourly Comparison Tables - June 26
+
+```{python}
+#| label: tables-jun26
+#| output: asis
+
+def create_hourly_table(exp_df, rad_df, hour):
+    """Create comparison table for a single hour"""
+    cols_map = ['I1N', 'I2N', 'I3N', 'I4N', 'I1S', 'I2S', 'I3S', 'I4S', 'I5S']
+    rows = []
+
+    for row in range(7):
+        for col in range(9):
+            point_id = row * 9 + col + 1
+            exp_val = exp_df.iloc[row, col]
+            rad_val = rad_df.iloc[row, col]
+            diff = rad_val - exp_val
+
+            rows.append({
+                'Point': point_id,
+                'Line': row + 1,
+                'Sensor': cols_map[col],
+                'Experimental': round(exp_val, 0),
+                'Radiance': round(rad_val, 0),
+                'Error': round(diff, 0),
+                'Error_pct': round(100 * diff / exp_val, 1) if exp_val > 0 else np.nan
+            })
+
+    return pd.DataFrame(rows)
+
+def compute_statistics(table):
+    """Compute error statistics"""
+    err = table['Error']
+    exp = table['Experimental']
+    abs_err = np.abs(err)
+
+    # Find points with min and max absolute error
+    min_idx = abs_err.idxmin()
+    max_idx = abs_err.idxmax()
+    min_point = table.loc[min_idx, 'Point']
+    max_point = table.loc[max_idx, 'Point']
+
+    stats = {
+        'Mean Bias (MBE)': f"{err.mean():+.1f} lux",
+        'MAE': f"{abs_err.mean():.1f} lux",
+        'Std Dev': f"{err.std():.1f} lux",
+        'RMSE': f"{np.sqrt((err**2).mean()):.1f} lux",
+        'Min Abs Error': f"{abs_err.min():.0f} lux (Point {min_point})",
+        'Max Abs Error': f"{abs_err.max():.0f} lux (Point {max_point})",
+        'MBE %': f"{100 * err.mean() / exp.mean():+.1f}%",
+        'CV(RMSE)': f"{100 * np.sqrt((err**2).mean()) / exp.mean():.1f}%"
+    }
+    return stats
+
+print("### June 26 - Hourly Comparison Tables\n")
+
+for i, hour in enumerate(hours):
+    print(f"#### {hour}:00\n")
+
+    table = create_hourly_table(exp_jun26[i], rad_jun26[i], hour)
+
+    # Display table
+    display_df = table[['Point', 'Line', 'Sensor', 'Experimental', 'Radiance', 'Error', 'Error_pct']]
+    display_df.columns = ['Point', 'Line', 'Sensor', 'Exp [lux]', 'Rad [lux]', 'Error [lux]', 'Error [%]']
+    print(display_df.to_markdown(index=False))
+
+    # Statistics
+    stats = compute_statistics(table)
+    print("\n**Statistics:**\n")
+    print("| Metric | Value |")
+    print("|--------|-------|")
+    for k, v in stats.items():
+        print(f"| {k} | {v} |")
+    print("\n---\n")
+```
+
+---
+
+# November 20 Results
+
+## Radiance Simulation - November 20
+
+```{python}
+#| label: fig-radiance-nov20
+#| fig-cap: "Radiance simulation results for November 20 (hours 9:00-17:00)"
+#| fig-width: 10
+#| fig-height: 8
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z = rad_nov20[i].values.astype(float)
+
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+
+plt.suptitle('Radiance Simulation - November 20', fontsize=12, fontweight='bold', y=0.98)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+## Experimental Measurements - November 20
+
+```{python}
+#| label: fig-experimental-nov20
+#| fig-cap: "Experimental measurements for November 20 (hours 9:00-17:00)"
+#| fig-width: 10
+#| fig-height: 8
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z = exp_nov20[i].values.astype(float)
+
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+
+plt.suptitle('Experimental Measurements - November 20', fontsize=12, fontweight='bold', y=0.98)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+## Error (Experimental - Radiance) - November 20
+
+```{python}
+#| label: fig-error-nov20
+#| fig-cap: "Error (Experimental - Radiance) for November 20 (hours 9:00-17:00)"
+#| fig-width: 10
+#| fig-height: 8
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z_error = exp_nov20[i].values.astype(float) - rad_nov20[i].values.astype(float)
+
+    contour_filled = ax.contourf(X, Y, Z_error, cmap='RdBu_r', alpha=0.7, levels=niveles_error, extend='both')
+    contour = ax.contour(X, Y, Z_error, colors='black', levels=niveles_error, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+    ax.contour(X, Y, Z_error, colors='black', levels=[0], linewidths=1.5)
+
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Error (Exp - Rad) [lux]')
+
+plt.suptitle('Error: Experimental - Radiance | November 20', fontsize=12, fontweight='bold', y=0.98)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+## Hourly Comparison Tables - November 20
+
+```{python}
+#| label: tables-nov20
+#| output: asis
+
+print("### November 20 - Hourly Comparison Tables\n")
+
+for i, hour in enumerate(hours):
+    print(f"#### {hour}:00\n")
+
+    table = create_hourly_table(exp_nov20[i], rad_nov20[i], hour)
+
+    # Display table
+    display_df = table[['Point', 'Line', 'Sensor', 'Experimental', 'Radiance', 'Error', 'Error_pct']]
+    display_df.columns = ['Point', 'Line', 'Sensor', 'Exp [lux]', 'Rad [lux]', 'Error [lux]', 'Error [%]']
+    print(display_df.to_markdown(index=False))
+
+    # Statistics
+    stats = compute_statistics(table)
+    print("\n**Statistics:**\n")
+    print("| Metric | Value |")
+    print("|--------|-------|")
+    for k, v in stats.items():
+        print(f"| {k} | {v} |")
+    print("\n---\n")
+```
+
+---
+
+# Overall Summary
+
+```{python}
+#| label: overall-summary
+
+def compute_day_statistics(exp_list, rad_list, day_label):
+    """Compute overall statistics for a day"""
+    all_exp = []
+    all_rad = []
+    all_err = []
+
+    for exp_df, rad_df in zip(exp_list, rad_list):
+        exp_vals = exp_df.values.flatten()
+        rad_vals = rad_df.values.flatten()
+        all_exp.extend(exp_vals)
+        all_rad.extend(rad_vals)
+        all_err.extend(rad_vals - exp_vals)
+
+    all_exp = np.array(all_exp)
+    all_rad = np.array(all_rad)
+    all_err = np.array(all_err)
+
+    return {
+        'Day': day_label,
+        'N points': len(all_err),
+        'Exp Mean [lux]': round(all_exp.mean(), 0),
+        'Rad Mean [lux]': round(all_rad.mean(), 0),
+        'MBE [lux]': round(all_err.mean(), 0),
+        'Std [lux]': round(all_err.std(), 0),
+        'RMSE [lux]': round(np.sqrt((all_err**2).mean()), 0),
+        'MBE [%]': round(100 * all_err.mean() / all_exp.mean(), 1),
+        'CV(RMSE) [%]': round(100 * np.sqrt((all_err**2).mean()) / all_exp.mean(), 1)
+    }
+
+stats_jun26 = compute_day_statistics(exp_jun26, rad_jun26, "June 26")
+stats_nov20 = compute_day_statistics(exp_nov20, rad_nov20, "November 20")
+
+summary_df = pd.DataFrame([stats_jun26, stats_nov20])
+print("## Overall Statistics Summary\n")
+print(summary_df.to_markdown(index=False))
+```
+
+```{python}
+#| label: fig-error-distribution
+#| fig-cap: "Error distribution comparison between June 26 and November 20"
+#| fig-width: 9
+#| fig-height: 4
+
+fig, axes = plt.subplots(1, 2, figsize=(9, 4))
+
+# June 26 errors
+all_err_jun = []
+for exp_df, rad_df in zip(exp_jun26, rad_jun26):
+    all_err_jun.extend((rad_df.values - exp_df.values).flatten())
+
+# November 20 errors
+all_err_nov = []
+for exp_df, rad_df in zip(exp_nov20, rad_nov20):
+    all_err_nov.extend((rad_df.values - exp_df.values).flatten())
+
+# Histograms
+axes[0].hist(all_err_jun, bins=50, edgecolor='black', alpha=0.7, color='steelblue')
+axes[0].axvline(x=0, color='red', linestyle='--', linewidth=2)
+axes[0].axvline(x=np.mean(all_err_jun), color='orange', linestyle='-', linewidth=2, label=f'Mean: {np.mean(all_err_jun):.0f} lux')
+axes[0].set_xlabel('Error (Radiance - Experimental) [lux]')
+axes[0].set_ylabel('Frequency')
+axes[0].set_title('June 26 - Error Distribution')
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+
+axes[1].hist(all_err_nov, bins=50, edgecolor='black', alpha=0.7, color='steelblue')
+axes[1].axvline(x=0, color='red', linestyle='--', linewidth=2)
+axes[1].axvline(x=np.mean(all_err_nov), color='orange', linestyle='-', linewidth=2, label=f'Mean: {np.mean(all_err_nov):.0f} lux')
+axes[1].set_xlabel('Error (Radiance - Experimental) [lux]')
+axes[1].set_ylabel('Frequency')
+axes[1].set_title('November 20 - Error Distribution')
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| label: fig-scatter-comparison
+#| fig-cap: "Scatter plot: Radiance vs Experimental illuminance"
+#| fig-width: 9
+#| fig-height: 4
+
+fig, axes = plt.subplots(1, 2, figsize=(9, 4))
+
+# June 26
+all_exp_jun = []
+all_rad_jun = []
+for exp_df, rad_df in zip(exp_jun26, rad_jun26):
+    all_exp_jun.extend(exp_df.values.flatten())
+    all_rad_jun.extend(rad_df.values.flatten())
+
+axes[0].scatter(all_exp_jun, all_rad_jun, alpha=0.3, s=10)
+max_val = max(max(all_exp_jun), max(all_rad_jun))
+axes[0].plot([0, max_val], [0, max_val], 'r--', linewidth=2, label='1:1 line')
+axes[0].set_xlabel('Experimental [lux]')
+axes[0].set_ylabel('Radiance [lux]')
+axes[0].set_title('June 26')
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+axes[0].set_aspect('equal')
+
+# November 20
+all_exp_nov = []
+all_rad_nov = []
+for exp_df, rad_df in zip(exp_nov20, rad_nov20):
+    all_exp_nov.extend(exp_df.values.flatten())
+    all_rad_nov.extend(rad_df.values.flatten())
+
+axes[1].scatter(all_exp_nov, all_rad_nov, alpha=0.3, s=10)
+max_val = max(max(all_exp_nov), max(all_rad_nov))
+axes[1].plot([0, max_val], [0, max_val], 'r--', linewidth=2, label='1:1 line')
+axes[1].set_xlabel('Experimental [lux]')
+axes[1].set_ylabel('Radiance [lux]')
+axes[1].set_title('November 20')
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+axes[1].set_aspect('equal')
+
+plt.tight_layout()
+plt.show()
+```
+
+## Conclusions
+
+Based on the validation analysis:
+
+1. **Positive Bias**: The Radiance simulation tends to overestimate illuminance values compared to experimental measurements, with mean bias of +487 lux (June 26) and +667 lux (November 20).
+
+2. **Relative Error**: The Mean Bias Error (MBE) is approximately +25% for June 26 and +43% for November 20.
+
+3. **Coefficient of Variation**: CV(RMSE) values of 52% (June) and 78% (November) indicate moderate to high variability between simulated and measured values.
+
+4. **Spatial Patterns**: Both simulation and measurements show similar spatial distribution patterns, with higher illuminance near windows and lower values in the interior.
