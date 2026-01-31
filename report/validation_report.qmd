@@ -14,7 +14,7 @@ execute:
   warning: false
   message: false
 ---
-   
+     
 ```{python}
 #| label: setup
 #| include: false
@@ -195,7 +195,7 @@ plt.show()
 ---
 
 # June 26 Results
-
+ 
 ## Radiance Simulation - June 26
 
 ```{python}
@@ -311,80 +311,65 @@ plt.tight_layout(rect=[0, 0, 0.88, 0.95])
 plt.show()
 ```
 
-## Hourly Comparison Tables - June 26
+## Error Metrics Definitions
+
+The following metrics are used to quantify the agreement between Radiance simulations ($R_i$) and experimental measurements ($E_i$) for $n$ sensor points:
+
+| Metric | Formula | Description |
+|--------|---------|-------------|
+| **Error** | $\varepsilon_i = R_i - E_i$ | Difference at each point |
+| **Mean Bias Error (MBE)** | $\text{MBE} = \frac{1}{n}\sum_{i=1}^{n}(R_i - E_i)$ | Average systematic error |
+| **Mean Absolute Error (MAE)** | $\text{MAE} = \frac{1}{n}\sum_{i=1}^{n}|R_i - E_i|$ | Average magnitude of errors |
+| **Standard Deviation** | $\sigma = \sqrt{\frac{1}{n}\sum_{i=1}^{n}(\varepsilon_i - \bar{\varepsilon})^2}$ | Spread of errors around mean |
+| **Root Mean Square Error (RMSE)** | $\text{RMSE} = \sqrt{\frac{1}{n}\sum_{i=1}^{n}(R_i - E_i)^2}$ | Quadratic mean of errors |
+| **MBE %** | $\text{MBE}_\% = 100 \times \frac{\text{MBE}}{\bar{E}}$ | Relative mean bias |
+| **CV(RMSE)** | $\text{CV(RMSE)} = 100 \times \frac{\text{RMSE}}{\bar{E}}$ | Coefficient of variation of RMSE |
+
+Where $\bar{E}$ is the mean of experimental values and $\bar{\varepsilon}$ is the mean error.
+
+---
+
+## Hourly Metrics Summary - June 26
 
 ```{python}
 #| label: tables-jun26
 #| output: asis
 
-def create_hourly_table(exp_df, rad_df, hour):
-    """Create comparison table for a single hour"""
-    cols_map = ['I1N', 'I2N', 'I3N', 'I4N', 'I1S', 'I2S', 'I3S', 'I4S', 'I5S']
-    rows = []
-
-    for row in range(7):
-        for col in range(9):
-            point_id = row * 9 + col + 1
-            exp_val = exp_df.iloc[row, col]
-            rad_val = rad_df.iloc[row, col]
-            diff = rad_val - exp_val
-
-            rows.append({
-                'Point': point_id,
-                'Line': row + 1,
-                'Sensor': cols_map[col],
-                'Experimental': round(exp_val, 0),
-                'Radiance': round(rad_val, 0),
-                'Error': round(diff, 0),
-                'Error_pct': round(100 * diff / exp_val, 1) if exp_val > 0 else np.nan
-            })
-
-    return pd.DataFrame(rows)
-
-def compute_statistics(table):
-    """Compute error statistics"""
-    err = table['Error']
-    exp = table['Experimental']
+def compute_hourly_metrics(exp_df, rad_df):
+    """Compute error metrics for a single hour"""
+    exp_vals = exp_df.values.flatten()
+    rad_vals = rad_df.values.flatten()
+    err = rad_vals - exp_vals
     abs_err = np.abs(err)
 
-    # Find points with min and max absolute error
-    min_idx = abs_err.idxmin()
-    max_idx = abs_err.idxmax()
-    min_point = table.loc[min_idx, 'Point']
-    max_point = table.loc[max_idx, 'Point']
+    mbe = err.mean()
+    mae = abs_err.mean()
+    std = err.std()
+    rmse = np.sqrt((err**2).mean())
+    exp_mean = exp_vals.mean()
+    mbe_pct = 100 * mbe / exp_mean
+    cvrmse = 100 * rmse / exp_mean
 
-    stats = {
-        'Mean Bias (MBE)': f"{err.mean():+.1f} lux",
-        'MAE': f"{abs_err.mean():.1f} lux",
-        'Std Dev': f"{err.std():.1f} lux",
-        'RMSE': f"{np.sqrt((err**2).mean()):.1f} lux",
-        'Min Abs Error': f"{abs_err.min():.0f} lux (Point {min_point})",
-        'Max Abs Error': f"{abs_err.max():.0f} lux (Point {max_point})",
-        'MBE %': f"{100 * err.mean() / exp.mean():+.1f}%",
-        'CV(RMSE)': f"{100 * np.sqrt((err**2).mean()) / exp.mean():.1f}%"
+    return {
+        'MBE [lux]': round(mbe, 0),
+        'MAE [lux]': round(mae, 0),
+        'Std [lux]': round(std, 0),
+        'RMSE [lux]': round(rmse, 0),
+        'MBE [%]': round(mbe_pct, 1),
+        'CV(RMSE) [%]': round(cvrmse, 1)
     }
-    return stats
 
-print("### June 26 - Hourly Comparison Tables\n")
-
+# Build metrics table for June 26
+jun26_metrics = []
 for i, hour in enumerate(hours):
-    print(f"#### {hour}:00\n")
+    metrics = compute_hourly_metrics(exp_jun26[i], rad_jun26[i])
+    metrics['Hour'] = f"{hour}:00"
+    jun26_metrics.append(metrics)
 
-    table = create_hourly_table(exp_jun26[i], rad_jun26[i], hour)
+jun26_df = pd.DataFrame(jun26_metrics)
+jun26_df = jun26_df[['Hour', 'MBE [lux]', 'MAE [lux]', 'Std [lux]', 'RMSE [lux]', 'MBE [%]', 'CV(RMSE) [%]']]
 
-    # Display table
-    display_df = table[['Point', 'Line', 'Sensor', 'Experimental', 'Radiance', 'Error', 'Error_pct']]
-    display_df.columns = ['Point', 'Line', 'Sensor', 'Exp [lux]', 'Rad [lux]', 'Error [lux]', 'Error [%]']
-    print(display_df.to_markdown(index=False))
-
-    # Statistics
-    stats = compute_statistics(table)
-    print("\n**Statistics:**\n")
-    print("| Metric | Value |")
-    print("|--------|-------|")
-    for k, v in stats.items():
-        print(f"| {k} | {v} |")
-    print("\n---\n")
+print(jun26_df.to_markdown(index=False))
 ```
 
 ---
@@ -500,32 +485,23 @@ plt.tight_layout(rect=[0, 0, 0.88, 0.95])
 plt.show()
 ```
 
-## Hourly Comparison Tables - November 20
+## Hourly Metrics Summary - November 20
 
 ```{python}
 #| label: tables-nov20
 #| output: asis
 
-print("### November 20 - Hourly Comparison Tables\n")
-
+# Build metrics table for November 20
+nov20_metrics = []
 for i, hour in enumerate(hours):
-    print(f"#### {hour}:00\n")
+    metrics = compute_hourly_metrics(exp_nov20[i], rad_nov20[i])
+    metrics['Hour'] = f"{hour}:00"
+    nov20_metrics.append(metrics)
 
-    table = create_hourly_table(exp_nov20[i], rad_nov20[i], hour)
+nov20_df = pd.DataFrame(nov20_metrics)
+nov20_df = nov20_df[['Hour', 'MBE [lux]', 'MAE [lux]', 'Std [lux]', 'RMSE [lux]', 'MBE [%]', 'CV(RMSE) [%]']]
 
-    # Display table
-    display_df = table[['Point', 'Line', 'Sensor', 'Experimental', 'Radiance', 'Error', 'Error_pct']]
-    display_df.columns = ['Point', 'Line', 'Sensor', 'Exp [lux]', 'Rad [lux]', 'Error [lux]', 'Error [%]']
-    print(display_df.to_markdown(index=False))
-
-    # Statistics
-    stats = compute_statistics(table)
-    print("\n**Statistics:**\n")
-    print("| Metric | Value |")
-    print("|--------|-------|")
-    for k, v in stats.items():
-        print(f"| {k} | {v} |")
-    print("\n---\n")
+print(nov20_df.to_markdown(index=False))
 ```
 
 ---
@@ -628,16 +604,6 @@ for exp_df, rad_df in zip(exp_jun26, rad_jun26):
     all_exp_jun.extend(exp_df.values.flatten())
     all_rad_jun.extend(rad_df.values.flatten())
 
-axes[0].scatter(all_exp_jun, all_rad_jun, alpha=0.3, s=10)
-max_val = max(max(all_exp_jun), max(all_rad_jun))
-axes[0].plot([0, max_val], [0, max_val], 'r--', linewidth=2, label='1:1 line')
-axes[0].set_xlabel('Experimental [lux]')
-axes[0].set_ylabel('Radiance [lux]')
-axes[0].set_title('June 26')
-axes[0].legend()
-axes[0].grid(True, alpha=0.3)
-axes[0].set_aspect('equal')
-
 # November 20
 all_exp_nov = []
 all_rad_nov = []
@@ -645,14 +611,31 @@ for exp_df, rad_df in zip(exp_nov20, rad_nov20):
     all_exp_nov.extend(exp_df.values.flatten())
     all_rad_nov.extend(rad_df.values.flatten())
 
+# Calculate global max for both plots
+global_max = max(max(all_exp_jun), max(all_rad_jun), max(all_exp_nov), max(all_rad_nov))
+
+# June 26 plot
+axes[0].scatter(all_exp_jun, all_rad_jun, alpha=0.3, s=10)
+axes[0].plot([0, global_max], [0, global_max], 'r--', linewidth=2, label='1:1 line')
+axes[0].set_xlabel('Experimental [lux]')
+axes[0].set_ylabel('Radiance [lux]')
+axes[0].set_title('June 26')
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+axes[0].set_xlim(0, global_max)
+axes[0].set_ylim(0, global_max)
+axes[0].set_aspect('equal')
+
+# November 20 plot
 axes[1].scatter(all_exp_nov, all_rad_nov, alpha=0.3, s=10)
-max_val = max(max(all_exp_nov), max(all_rad_nov))
-axes[1].plot([0, max_val], [0, max_val], 'r--', linewidth=2, label='1:1 line')
+axes[1].plot([0, global_max], [0, global_max], 'r--', linewidth=2, label='1:1 line')
 axes[1].set_xlabel('Experimental [lux]')
 axes[1].set_ylabel('Radiance [lux]')
 axes[1].set_title('November 20')
 axes[1].legend()
 axes[1].grid(True, alpha=0.3)
+axes[1].set_xlim(0, global_max)
+axes[1].set_ylim(0, global_max)
 axes[1].set_aspect('equal')
 
 plt.tight_layout()
