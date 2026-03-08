@@ -132,3 +132,4 @@ radiance_nelier_sims/
 - Radiance: Ward, G. J. (1994). The RADIANCE lighting simulation and rendering system.
 - Two-Phase Method: McNeil, A. (2013). The Five-Phase Method for Simulating Complex Fenestration.
 # radiance_nelier_sims
+# radiance_nelier_simsv0p2
