@@ -41,7 +41,7 @@ This report presents the validation of Radiance daylighting simulations against 
 
 {{< include MATERIALS.md >}}
 
----
+--- 
 
 ## Data Loading
 
@@ -126,20 +126,30 @@ def load_radiance_data(ill_file, month, day, hours):
 # Load data
 hours = [9, 10, 11, 12, 13, 14, 15, 16, 17]
 ill_file = "../edificio/results/dc/annual_validation.ill"
+ill_file_cal = "../edificio/results/dc/annual_validation_calibrated.ill"
+ill_file_cal_nov = "../edificio/results/dc/annual_validation_calibrated_november.ill"
 
 # June 26
 exp_jun26 = load_experimental_data("../data/experimental/005_26Junio", hours)
 rad_jun26 = load_radiance_data(ill_file, 6, 26, hours)
+rad_jun26_cal = load_radiance_data(ill_file_cal, 6, 26, hours)
 
 # November 20
 exp_nov20 = load_experimental_data("../data/experimental/006_20Nov", hours)
 rad_nov20 = load_radiance_data(ill_file, 11, 20, hours)
+rad_nov20_cal = load_radiance_data(ill_file_cal, 11, 20, hours)
+rad_nov20_cal_nov = load_radiance_data(ill_file_cal_nov, 11, 20, hours)  # November-optimized
+
+# Load November-calibrated data for June 26 as well (to show effect on both days)
+rad_jun26_cal_nov = load_radiance_data(ill_file_cal_nov, 6, 26, hours)  # November-optimized on June
 
 print("Data loaded successfully:")
 print(f"  - June 26: {len(exp_jun26)} hours of experimental and radiance data")
 print(f"  - November 20: {len(exp_nov20)} hours of experimental and radiance data")
+print(f"  - Calibrated (Combined) data loaded for both days")
+print(f"  - Calibrated (November-optimized) data loaded for both days")
 ```
-
+ 
 ## Sensor Grid Layout
 
 The validation uses a 7×9 grid of 63 sensor points at work plane height (0.75m):
@@ -194,52 +204,27 @@ plt.show()
 
 ---
 
-# June 26 Results
- 
-## Radiance Simulation - June 26
+# Illuminance Contour Maps
 
 ```{python}
-#| label: fig-radiance-jun26
-#| fig-cap: "Radiance simulation results for June 26 (hours 9:00-17:00)"
-#| fig-width: 10
-#| fig-height: 8
+#| label: setup-contour-maps
+#| include: false
 
 cols_map = ['I1N', 'I2N', 'I3N', 'I4N', 'I1S', 'I2S', 'I3S', 'I4S', 'I5S']
 niveles = [0, 299, 500, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 10000]
-
-fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
-
-for i, hour in enumerate(hours):
-    ax = axes[i // 3, i % 3]
-
-    X, Y = np.meshgrid(x_positions, y_positions)
-    Z = rad_jun26[i].values.astype(float)
-
-    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
-    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
-    ax.clabel(contour, inline=True, fontsize=6)
-
-    ax.set_aspect('equal')
-    ax.set_title(f'{hour}:00')
-    ax.invert_yaxis()
-
-for i in range(3):
-    axes[2, i].set_xlabel('[m]')
-    axes[i, 0].set_ylabel('[m]')
-
-cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
-fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
-
-plt.suptitle('Radiance Simulation - June 26', fontsize=12, fontweight='bold', y=0.98)
-plt.tight_layout(rect=[0, 0, 0.88, 0.95])
-plt.show()
 ```
 
-## Experimental Measurements - June 26
+::: {.panel-tabset}
+
+## June 26
+
+::: {.panel-tabset}
+
+### Experimental
 
 ```{python}
 #| label: fig-experimental-jun26
-#| fig-cap: "Experimental measurements for June 26 (hours 9:00-17:00)"
+#| fig-cap: "Experimental Measurements - June 26 (hours 9:00-17:00)"
 #| fig-width: 10
 #| fig-height: 8
 
@@ -247,14 +232,11 @@ fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
 
 for i, hour in enumerate(hours):
     ax = axes[i // 3, i % 3]
-
     X, Y = np.meshgrid(x_positions, y_positions)
     Z = exp_jun26[i].values.astype(float)
-
     contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
     contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
     ax.clabel(contour, inline=True, fontsize=6)
-
     ax.set_aspect('equal')
     ax.set_title(f'{hour}:00')
     ax.invert_yaxis()
@@ -265,36 +247,28 @@ for i in range(3):
 
 cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
 fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
-
 plt.suptitle('Experimental Measurements - June 26', fontsize=12, fontweight='bold', y=0.98)
 plt.tight_layout(rect=[0, 0, 0.88, 0.95])
 plt.show()
 ```
 
-## Error (Experimental - Radiance) - June 26
+### Simulation Original
 
 ```{python}
-#| label: fig-error-jun26
-#| fig-cap: "Error (Experimental - Radiance) for June 26 (hours 9:00-17:00)"
+#| label: fig-radiance-jun26
+#| fig-cap: "Original Radiance Simulation - June 26 (hours 9:00-17:00)"
 #| fig-width: 10
 #| fig-height: 8
-
-# Error levels (symmetric around 0)
-niveles_error = [-5000, -3000, -2000, -1000, -500, 0, 500, 1000, 2000, 3000, 5000]
 
 fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
 
 for i, hour in enumerate(hours):
     ax = axes[i // 3, i % 3]
-
     X, Y = np.meshgrid(x_positions, y_positions)
-    Z_error = exp_jun26[i].values.astype(float) - rad_jun26[i].values.astype(float)
-
-    contour_filled = ax.contourf(X, Y, Z_error, cmap='RdBu_r', alpha=0.7, levels=niveles_error, extend='both')
-    contour = ax.contour(X, Y, Z_error, colors='black', levels=niveles_error, linewidths=0.5)
+    Z = rad_jun26[i].values.astype(float)
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
     ax.clabel(contour, inline=True, fontsize=6)
-    ax.contour(X, Y, Z_error, colors='black', levels=[0], linewidths=1.5)
-
     ax.set_aspect('equal')
     ax.set_title(f'{hour}:00')
     ax.invert_yaxis()
@@ -304,12 +278,217 @@ for i in range(3):
     axes[i, 0].set_ylabel('[m]')
 
 cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
-fig.colorbar(contour_filled, cax=cbar_ax, label='Error (Exp - Rad) [lux]')
-
-plt.suptitle('Error: Experimental - Radiance | June 26', fontsize=12, fontweight='bold', y=0.98)
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+plt.suptitle('Original Radiance Simulation - June 26', fontsize=12, fontweight='bold', y=0.98)
 plt.tight_layout(rect=[0, 0, 0.88, 0.95])
 plt.show()
 ```
+
+### Best Calibration Both Days
+
+```{python}
+#| label: fig-radiance-cal-jun26
+#| fig-cap: "Radiance - Best Calibration for Both Days - June 26 (τ=0.76, ρ_floor=0.21, ρ_hall=0.29)"
+#| fig-width: 10
+#| fig-height: 8
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z = rad_jun26_cal[i].values.astype(float)
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+plt.suptitle('Radiance - Best Calibration for Both Days - June 26\n(τ=0.76, ρ_floor=0.21, ρ_hall=0.29)', fontsize=11, fontweight='bold', y=1.0)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+### Best Calibration November
+
+```{python}
+#| label: fig-radiance-cal-nov-jun26
+#| fig-cap: "Radiance - Best Calibration for November - June 26 (τ=0.70, ρ_floor=0.11, ρ_hall=0.17)"
+#| fig-width: 10
+#| fig-height: 8
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z = rad_jun26_cal_nov[i].values.astype(float)
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles, extend='both')
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+plt.suptitle('Radiance - Best Calibration for November - June 26\n(τ=0.70, ρ_floor=0.11, ρ_hall=0.17)', fontsize=11, fontweight='bold', y=1.0)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+:::
+
+## November 20
+
+::: {.panel-tabset}
+
+### Experimental
+
+```{python}
+#| label: fig-experimental-nov20
+#| fig-cap: "Experimental Measurements - November 20 (hours 9:00-17:00)"
+#| fig-width: 10
+#| fig-height: 8
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z = exp_nov20[i].values.astype(float)
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+plt.suptitle('Experimental Measurements - November 20', fontsize=12, fontweight='bold', y=0.98)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+### Simulation Original
+
+```{python}
+#| label: fig-radiance-nov20
+#| fig-cap: "Original Radiance Simulation - November 20 (hours 9:00-17:00)"
+#| fig-width: 10
+#| fig-height: 8
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z = rad_nov20[i].values.astype(float)
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+plt.suptitle('Original Radiance Simulation - November 20', fontsize=12, fontweight='bold', y=0.98)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+### Best Calibration Both Days
+
+```{python}
+#| label: fig-radiance-cal-nov20
+#| fig-cap: "Radiance - Best Calibration for Both Days - November 20 (τ=0.76, ρ_floor=0.21, ρ_hall=0.29)"
+#| fig-width: 10
+#| fig-height: 8
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z = rad_nov20_cal[i].values.astype(float)
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+plt.suptitle('Radiance - Best Calibration for Both Days - November 20\n(τ=0.76, ρ_floor=0.21, ρ_hall=0.29)', fontsize=11, fontweight='bold', y=1.0)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+### Best Calibration November
+
+```{python}
+#| label: fig-radiance-cal-nov-nov20
+#| fig-cap: "Radiance - Best Calibration for November - November 20 (τ=0.70, ρ_floor=0.11, ρ_hall=0.17)"
+#| fig-width: 10
+#| fig-height: 8
+
+fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
+
+for i, hour in enumerate(hours):
+    ax = axes[i // 3, i % 3]
+    X, Y = np.meshgrid(x_positions, y_positions)
+    Z = rad_nov20_cal_nov[i].values.astype(float)
+    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles, extend='both')
+    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
+    ax.clabel(contour, inline=True, fontsize=6)
+    ax.set_aspect('equal')
+    ax.set_title(f'{hour}:00')
+    ax.invert_yaxis()
+
+for i in range(3):
+    axes[2, i].set_xlabel('[m]')
+    axes[i, 0].set_ylabel('[m]')
+
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
+plt.suptitle('Radiance - Best Calibration for November - November 20\n(τ=0.70, ρ_floor=0.11, ρ_hall=0.17)', fontsize=11, fontweight='bold', y=1.0)
+plt.tight_layout(rect=[0, 0, 0.88, 0.95])
+plt.show()
+```
+
+:::
+
+:::
+
+---
+
+# Hourly Metrics Tables
 
 ## Error Metrics Definitions
 
@@ -327,13 +506,11 @@ The following metrics are used to quantify the agreement between Radiance simula
 
 Where $\bar{E}$ is the mean of experimental values and $\bar{\varepsilon}$ is the mean error.
 
----
-
-## Hourly Metrics Summary - June 26
+## Hourly Metrics Summary
 
 ```{python}
-#| label: tables-jun26
-#| output: asis
+#| label: define-metrics-function
+#| include: false
 
 def compute_hourly_metrics(exp_df, rad_df):
     """Compute error metrics for a single hour"""
@@ -359,150 +536,106 @@ def compute_hourly_metrics(exp_df, rad_df):
         'CV(RMSE) [%]': round(cvrmse, 1)
     }
 
-# Build metrics table for June 26
-jun26_metrics = []
-for i, hour in enumerate(hours):
-    metrics = compute_hourly_metrics(exp_jun26[i], rad_jun26[i])
-    metrics['Hour'] = f"{hour}:00"
-    jun26_metrics.append(metrics)
+def build_metrics_table(exp_list, rad_list, hours):
+    """Build metrics table with average row"""
+    metrics_list = []
+    for i, hour in enumerate(hours):
+        metrics = compute_hourly_metrics(exp_list[i], rad_list[i])
+        metrics['Hour'] = f"{hour}:00"
+        metrics_list.append(metrics)
 
-jun26_df = pd.DataFrame(jun26_metrics)
-jun26_df = jun26_df[['Hour', 'MBE [lux]', 'MAE [lux]', 'Std [lux]', 'RMSE [lux]', 'MBE [%]', 'CV(RMSE) [%]']]
+    df = pd.DataFrame(metrics_list)
+    df = df[['Hour', 'MBE [lux]', 'MAE [lux]', 'Std [lux]', 'RMSE [lux]', 'MBE [%]', 'CV(RMSE) [%]']]
 
-print(jun26_df.to_markdown(index=False))
+    # Add average row
+    avg_row = pd.DataFrame([{
+        'Hour': '**Average**',
+        'MBE [lux]': round(df['MBE [lux]'].mean(), 0),
+        'MAE [lux]': round(df['MAE [lux]'].mean(), 0),
+        'Std [lux]': round(df['Std [lux]'].mean(), 0),
+        'RMSE [lux]': round(df['RMSE [lux]'].mean(), 0),
+        'MBE [%]': round(df['MBE [%]'].mean(), 1),
+        'CV(RMSE) [%]': round(df['CV(RMSE) [%]'].mean(), 1)
+    }])
+    df = pd.concat([df, avg_row], ignore_index=True)
+    return df
 ```
 
----
+::: {.panel-tabset}
 
-# November 20 Results
+## June 26
 
-## Radiance Simulation - November 20
+::: {.panel-tabset}
 
-```{python}
-#| label: fig-radiance-nov20
-#| fig-cap: "Radiance simulation results for November 20 (hours 9:00-17:00)"
-#| fig-width: 10
-#| fig-height: 8
-
-fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
-
-for i, hour in enumerate(hours):
-    ax = axes[i // 3, i % 3]
-
-    X, Y = np.meshgrid(x_positions, y_positions)
-    Z = rad_nov20[i].values.astype(float)
-
-    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
-    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
-    ax.clabel(contour, inline=True, fontsize=6)
-
-    ax.set_aspect('equal')
-    ax.set_title(f'{hour}:00')
-    ax.invert_yaxis()
-
-for i in range(3):
-    axes[2, i].set_xlabel('[m]')
-    axes[i, 0].set_ylabel('[m]')
-
-cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
-fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
-
-plt.suptitle('Radiance Simulation - November 20', fontsize=12, fontweight='bold', y=0.98)
-plt.tight_layout(rect=[0, 0, 0.88, 0.95])
-plt.show()
-```
-
-## Experimental Measurements - November 20
+### Original
 
 ```{python}
-#| label: fig-experimental-nov20
-#| fig-cap: "Experimental measurements for November 20 (hours 9:00-17:00)"
-#| fig-width: 10
-#| fig-height: 8
-
-fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
-
-for i, hour in enumerate(hours):
-    ax = axes[i // 3, i % 3]
-
-    X, Y = np.meshgrid(x_positions, y_positions)
-    Z = exp_nov20[i].values.astype(float)
-
-    contour_filled = ax.contourf(X, Y, Z, cmap='jet', alpha=0.7, levels=niveles)
-    contour = ax.contour(X, Y, Z, colors='black', levels=niveles, linewidths=0.5)
-    ax.clabel(contour, inline=True, fontsize=6)
-
-    ax.set_aspect('equal')
-    ax.set_title(f'{hour}:00')
-    ax.invert_yaxis()
-
-for i in range(3):
-    axes[2, i].set_xlabel('[m]')
-    axes[i, 0].set_ylabel('[m]')
-
-cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
-fig.colorbar(contour_filled, cax=cbar_ax, label='Illuminance [lux]')
-
-plt.suptitle('Experimental Measurements - November 20', fontsize=12, fontweight='bold', y=0.98)
-plt.tight_layout(rect=[0, 0, 0.88, 0.95])
-plt.show()
-```
-
-## Error (Experimental - Radiance) - November 20
-
-```{python}
-#| label: fig-error-nov20
-#| fig-cap: "Error (Experimental - Radiance) for November 20 (hours 9:00-17:00)"
-#| fig-width: 10
-#| fig-height: 8
-
-fig, axes = plt.subplots(3, 3, figsize=(10, 8), sharex=True, sharey=True)
-
-for i, hour in enumerate(hours):
-    ax = axes[i // 3, i % 3]
-
-    X, Y = np.meshgrid(x_positions, y_positions)
-    Z_error = exp_nov20[i].values.astype(float) - rad_nov20[i].values.astype(float)
-
-    contour_filled = ax.contourf(X, Y, Z_error, cmap='RdBu_r', alpha=0.7, levels=niveles_error, extend='both')
-    contour = ax.contour(X, Y, Z_error, colors='black', levels=niveles_error, linewidths=0.5)
-    ax.clabel(contour, inline=True, fontsize=6)
-    ax.contour(X, Y, Z_error, colors='black', levels=[0], linewidths=1.5)
-
-    ax.set_aspect('equal')
-    ax.set_title(f'{hour}:00')
-    ax.invert_yaxis()
-
-for i in range(3):
-    axes[2, i].set_xlabel('[m]')
-    axes[i, 0].set_ylabel('[m]')
-
-cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
-fig.colorbar(contour_filled, cax=cbar_ax, label='Error (Exp - Rad) [lux]')
-
-plt.suptitle('Error: Experimental - Radiance | November 20', fontsize=12, fontweight='bold', y=0.98)
-plt.tight_layout(rect=[0, 0, 0.88, 0.95])
-plt.show()
-```
-
-## Hourly Metrics Summary - November 20
-
-```{python}
-#| label: tables-nov20
+#| label: tables-jun26-orig
 #| output: asis
 
-# Build metrics table for November 20
-nov20_metrics = []
-for i, hour in enumerate(hours):
-    metrics = compute_hourly_metrics(exp_nov20[i], rad_nov20[i])
-    metrics['Hour'] = f"{hour}:00"
-    nov20_metrics.append(metrics)
-
-nov20_df = pd.DataFrame(nov20_metrics)
-nov20_df = nov20_df[['Hour', 'MBE [lux]', 'MAE [lux]', 'Std [lux]', 'RMSE [lux]', 'MBE [%]', 'CV(RMSE) [%]']]
-
-print(nov20_df.to_markdown(index=False))
+jun26_orig_df = build_metrics_table(exp_jun26, rad_jun26, hours)
+print(jun26_orig_df.to_markdown(index=False))
 ```
+
+### Best Calibration Both Days
+
+```{python}
+#| label: tables-jun26-cal
+#| output: asis
+
+jun26_cal_df = build_metrics_table(exp_jun26, rad_jun26_cal, hours)
+print(jun26_cal_df.to_markdown(index=False))
+```
+
+### Best Calibration November
+
+```{python}
+#| label: tables-jun26-cal-nov
+#| output: asis
+
+jun26_cal_nov_df = build_metrics_table(exp_jun26, rad_jun26_cal_nov, hours)
+print(jun26_cal_nov_df.to_markdown(index=False))
+```
+
+:::
+
+## November 20
+
+::: {.panel-tabset}
+
+### Original
+
+```{python}
+#| label: tables-nov20-orig
+#| output: asis
+
+nov20_orig_df = build_metrics_table(exp_nov20, rad_nov20, hours)
+print(nov20_orig_df.to_markdown(index=False))
+```
+
+### Best Calibration Both Days
+
+```{python}
+#| label: tables-nov20-cal
+#| output: asis
+
+nov20_cal_df = build_metrics_table(exp_nov20, rad_nov20_cal, hours)
+print(nov20_cal_df.to_markdown(index=False))
+```
+
+### Best Calibration November
+
+```{python}
+#| label: tables-nov20-cal-nov
+#| output: asis
+
+nov20_cal_nov_df = build_metrics_table(exp_nov20, rad_nov20_cal_nov, hours)
+print(nov20_cal_nov_df.to_markdown(index=False))
+```
+
+:::
+
+:::
 
 ---
 
@@ -511,7 +644,7 @@ print(nov20_df.to_markdown(index=False))
 ```{python}
 #| label: overall-summary
 
-def compute_day_statistics(exp_list, rad_list, day_label):
+def compute_day_statistics(exp_list, rad_list, day_label, sim_type):
     """Compute overall statistics for a day"""
     all_exp = []
     all_rad = []
@@ -529,10 +662,11 @@ def compute_day_statistics(exp_list, rad_list, day_label):
     all_err = np.array(all_err)
 
     return {
+        'Simulation': sim_type,
         'Day': day_label,
         'N points': len(all_err),
         'Exp Mean [lux]': round(all_exp.mean(), 0),
-        'Rad Mean [lux]': round(all_rad.mean(), 0),
+        'Sim Mean [lux]': round(all_rad.mean(), 0),
         'MBE [lux]': round(all_err.mean(), 0),
         'Std [lux]': round(all_err.std(), 0),
         'RMSE [lux]': round(np.sqrt((all_err**2).mean()), 0),
@@ -540,116 +674,570 @@ def compute_day_statistics(exp_list, rad_list, day_label):
         'CV(RMSE) [%]': round(100 * np.sqrt((all_err**2).mean()) / all_exp.mean(), 1)
     }
 
-stats_jun26 = compute_day_statistics(exp_jun26, rad_jun26, "June 26")
-stats_nov20 = compute_day_statistics(exp_nov20, rad_nov20, "November 20")
+# Original Radiance
+stats_jun26_orig = compute_day_statistics(exp_jun26, rad_jun26, "June 26", "Original")
+stats_nov20_orig = compute_day_statistics(exp_nov20, rad_nov20, "November 20", "Original")
 
-summary_df = pd.DataFrame([stats_jun26, stats_nov20])
+# Calibrated (Combined) Radiance
+stats_jun26_cal = compute_day_statistics(exp_jun26, rad_jun26_cal, "June 26", "Calibrated (Combined)")
+stats_nov20_cal = compute_day_statistics(exp_nov20, rad_nov20_cal, "November 20", "Calibrated (Combined)")
+
+# Calibrated (November) Radiance - applied to both days
+stats_jun26_cal_nov = compute_day_statistics(exp_jun26, rad_jun26_cal_nov, "June 26", "Calibrated (November)")
+stats_nov20_cal_nov = compute_day_statistics(exp_nov20, rad_nov20_cal_nov, "November 20", "Calibrated (November)")
+
+summary_df = pd.DataFrame([
+    stats_jun26_orig, stats_jun26_cal, stats_jun26_cal_nov,
+    stats_nov20_orig, stats_nov20_cal, stats_nov20_cal_nov
+])
+summary_df = summary_df[['Simulation', 'Day', 'N points', 'Exp Mean [lux]', 'Sim Mean [lux]', 'MBE [lux]', 'Std [lux]', 'RMSE [lux]', 'MBE [%]', 'CV(RMSE) [%]']]
+
 print("## Overall Statistics Summary\n")
+print("Comparison of three simulation configurations:\n")
+print("- **Original**: τ=0.88, ρ_floor=0.30, ρ_hall=0.36")
+print("- **Calibrated (Combined)**: τ=0.76, ρ_floor=0.21, ρ_hall=0.29 (optimized for both days)")
+print("- **Calibrated (November)**: τ=0.70, ρ_floor=0.11, ρ_hall=0.17 (optimized for November 20)\n")
 print(summary_df.to_markdown(index=False))
 ```
 
+## Error Distribution
+
 ```{python}
-#| label: fig-error-distribution
-#| fig-cap: "Error distribution comparison between June 26 and November 20"
-#| fig-width: 9
-#| fig-height: 4
+#| label: compute-all-errors
+#| include: false
 
-fig, axes = plt.subplots(1, 2, figsize=(9, 4))
-
-# June 26 errors
-all_err_jun = []
+# Compute all error arrays for both days and all calibration types
+# June 26
+all_err_jun_orig = []
 for exp_df, rad_df in zip(exp_jun26, rad_jun26):
-    all_err_jun.extend((rad_df.values - exp_df.values).flatten())
+    all_err_jun_orig.extend((rad_df.values - exp_df.values).flatten())
 
-# November 20 errors
-all_err_nov = []
+all_err_jun_cal = []
+for exp_df, rad_df in zip(exp_jun26, rad_jun26_cal):
+    all_err_jun_cal.extend((rad_df.values - exp_df.values).flatten())
+
+all_err_jun_cal_nov = []
+for exp_df, rad_df in zip(exp_jun26, rad_jun26_cal_nov):
+    all_err_jun_cal_nov.extend((rad_df.values - exp_df.values).flatten())
+
+# November 20
+all_err_nov_orig = []
 for exp_df, rad_df in zip(exp_nov20, rad_nov20):
-    all_err_nov.extend((rad_df.values - exp_df.values).flatten())
+    all_err_nov_orig.extend((rad_df.values - exp_df.values).flatten())
 
-# Histograms
-axes[0].hist(all_err_jun, bins=50, edgecolor='black', alpha=0.7, color='steelblue')
-axes[0].axvline(x=0, color='red', linestyle='--', linewidth=2)
-axes[0].axvline(x=np.mean(all_err_jun), color='orange', linestyle='-', linewidth=2, label=f'Mean: {np.mean(all_err_jun):.0f} lux')
-axes[0].set_xlabel('Error (Radiance - Experimental) [lux]')
-axes[0].set_ylabel('Frequency')
-axes[0].set_title('June 26 - Error Distribution')
-axes[0].legend()
-axes[0].grid(True, alpha=0.3)
+all_err_nov_cal = []
+for exp_df, rad_df in zip(exp_nov20, rad_nov20_cal):
+    all_err_nov_cal.extend((rad_df.values - exp_df.values).flatten())
 
-axes[1].hist(all_err_nov, bins=50, edgecolor='black', alpha=0.7, color='steelblue')
-axes[1].axvline(x=0, color='red', linestyle='--', linewidth=2)
-axes[1].axvline(x=np.mean(all_err_nov), color='orange', linestyle='-', linewidth=2, label=f'Mean: {np.mean(all_err_nov):.0f} lux')
-axes[1].set_xlabel('Error (Radiance - Experimental) [lux]')
-axes[1].set_ylabel('Frequency')
-axes[1].set_title('November 20 - Error Distribution')
-axes[1].legend()
-axes[1].grid(True, alpha=0.3)
+all_err_nov_cal_nov = []
+for exp_df, rad_df in zip(exp_nov20, rad_nov20_cal_nov):
+    all_err_nov_cal_nov.extend((rad_df.values - exp_df.values).flatten())
 
+# Common x limits and bins for all plots
+all_errors = (all_err_jun_orig + all_err_nov_orig + all_err_jun_cal + all_err_nov_cal +
+              all_err_jun_cal_nov + all_err_nov_cal_nov)
+xlim = max(abs(min(all_errors)), abs(max(all_errors))) * 1.1
+bins = np.linspace(-xlim, xlim, 51)
+
+# Pre-compute histogram counts to find common y limits
+counts_jun_orig, _ = np.histogram(all_err_jun_orig, bins=bins)
+counts_jun_cal, _ = np.histogram(all_err_jun_cal, bins=bins)
+counts_jun_cal_nov, _ = np.histogram(all_err_jun_cal_nov, bins=bins)
+counts_nov_orig, _ = np.histogram(all_err_nov_orig, bins=bins)
+counts_nov_cal, _ = np.histogram(all_err_nov_cal, bins=bins)
+counts_nov_cal_nov, _ = np.histogram(all_err_nov_cal_nov, bins=bins)
+
+# Common y limits for each day (with 5% margin)
+ylim_jun = max(counts_jun_orig.max(), counts_jun_cal.max(), counts_jun_cal_nov.max()) * 1.05
+ylim_nov = max(counts_nov_orig.max(), counts_nov_cal.max(), counts_nov_cal_nov.max()) * 1.05
+```
+
+::: {.panel-tabset}
+
+## June 26
+
+::: {.panel-tabset}
+
+### Original
+
+```{python}
+#| label: fig-error-dist-jun26-orig
+#| fig-cap: "Error Distribution - Original Simulation - June 26"
+#| fig-width: 8
+#| fig-height: 5
+
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.hist(all_err_jun_orig, bins=bins, alpha=0.7, color='steelblue', edgecolor='black', linewidth=0.5)
+ax.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero error')
+ax.axvline(x=np.mean(all_err_jun_orig), color='darkblue', linestyle='-', linewidth=2,
+           label=f'Mean: {np.mean(all_err_jun_orig):+.0f} lux')
+ax.set_xlabel('Error (Radiance - Experimental) [lux]')
+ax.set_ylabel('Frequency')
+ax.set_title('Original Simulation - June 26\n(τ=0.88, ρ_floor=0.30, ρ_hall=0.36)')
+ax.legend(loc='upper right')
+ax.grid(True, alpha=0.3)
+ax.set_xlim(-xlim, xlim)
+ax.set_ylim(0, ylim_jun)
 plt.tight_layout()
 plt.show()
 ```
+
+### Best Calibration Both Days
+
+```{python}
+#| label: fig-error-dist-jun26-cal
+#| fig-cap: "Error Distribution - Best Calibration Both Days - June 26"
+#| fig-width: 8
+#| fig-height: 5
+
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.hist(all_err_jun_cal, bins=bins, alpha=0.7, color='darkorange', edgecolor='black', linewidth=0.5)
+ax.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero error')
+ax.axvline(x=np.mean(all_err_jun_cal), color='darkorange', linestyle='-', linewidth=2,
+           label=f'Mean: {np.mean(all_err_jun_cal):+.0f} lux')
+ax.set_xlabel('Error (Radiance - Experimental) [lux]')
+ax.set_ylabel('Frequency')
+ax.set_title('Best Calibration Both Days - June 26\n(τ=0.76, ρ_floor=0.21, ρ_hall=0.29)')
+ax.legend(loc='upper right')
+ax.grid(True, alpha=0.3)
+ax.set_xlim(-xlim, xlim)
+ax.set_ylim(0, ylim_jun)
+plt.tight_layout()
+plt.show()
+```
+
+### Best Calibration November
+
+```{python}
+#| label: fig-error-dist-jun26-cal-nov
+#| fig-cap: "Error Distribution - Best Calibration November - June 26"
+#| fig-width: 8
+#| fig-height: 5
+
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.hist(all_err_jun_cal_nov, bins=bins, alpha=0.7, color='forestgreen', edgecolor='black', linewidth=0.5)
+ax.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero error')
+ax.axvline(x=np.mean(all_err_jun_cal_nov), color='darkgreen', linestyle='-', linewidth=2,
+           label=f'Mean: {np.mean(all_err_jun_cal_nov):+.0f} lux')
+ax.set_xlabel('Error (Radiance - Experimental) [lux]')
+ax.set_ylabel('Frequency')
+ax.set_title('Best Calibration November - June 26\n(τ=0.70, ρ_floor=0.11, ρ_hall=0.17)')
+ax.legend(loc='upper right')
+ax.grid(True, alpha=0.3)
+ax.set_xlim(-xlim, xlim)
+ax.set_ylim(0, ylim_jun)
+plt.tight_layout()
+plt.show()
+```
+
+:::
+
+## November 20
+
+::: {.panel-tabset}
+
+### Original
+
+```{python}
+#| label: fig-error-dist-nov20-orig
+#| fig-cap: "Error Distribution - Original Simulation - November 20"
+#| fig-width: 8
+#| fig-height: 5
+
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.hist(all_err_nov_orig, bins=bins, alpha=0.7, color='steelblue', edgecolor='black', linewidth=0.5)
+ax.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero error')
+ax.axvline(x=np.mean(all_err_nov_orig), color='darkblue', linestyle='-', linewidth=2,
+           label=f'Mean: {np.mean(all_err_nov_orig):+.0f} lux')
+ax.set_xlabel('Error (Radiance - Experimental) [lux]')
+ax.set_ylabel('Frequency')
+ax.set_title('Original Simulation - November 20\n(τ=0.88, ρ_floor=0.30, ρ_hall=0.36)')
+ax.legend(loc='upper right')
+ax.grid(True, alpha=0.3)
+ax.set_xlim(-xlim, xlim)
+ax.set_ylim(0, ylim_nov)
+plt.tight_layout()
+plt.show()
+```
+
+### Best Calibration Both Days
+
+```{python}
+#| label: fig-error-dist-nov20-cal
+#| fig-cap: "Error Distribution - Best Calibration Both Days - November 20"
+#| fig-width: 8
+#| fig-height: 5
+
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.hist(all_err_nov_cal, bins=bins, alpha=0.7, color='darkorange', edgecolor='black', linewidth=0.5)
+ax.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero error')
+ax.axvline(x=np.mean(all_err_nov_cal), color='darkorange', linestyle='-', linewidth=2,
+           label=f'Mean: {np.mean(all_err_nov_cal):+.0f} lux')
+ax.set_xlabel('Error (Radiance - Experimental) [lux]')
+ax.set_ylabel('Frequency')
+ax.set_title('Best Calibration Both Days - November 20\n(τ=0.76, ρ_floor=0.21, ρ_hall=0.29)')
+ax.legend(loc='upper right')
+ax.grid(True, alpha=0.3)
+ax.set_xlim(-xlim, xlim)
+ax.set_ylim(0, ylim_nov)
+plt.tight_layout()
+plt.show()
+```
+
+### Best Calibration November
+
+```{python}
+#| label: fig-error-dist-nov20-cal-nov
+#| fig-cap: "Error Distribution - Best Calibration November - November 20"
+#| fig-width: 8
+#| fig-height: 5
+
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.hist(all_err_nov_cal_nov, bins=bins, alpha=0.7, color='forestgreen', edgecolor='black', linewidth=0.5)
+ax.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero error')
+ax.axvline(x=np.mean(all_err_nov_cal_nov), color='darkgreen', linestyle='-', linewidth=2,
+           label=f'Mean: {np.mean(all_err_nov_cal_nov):+.0f} lux')
+ax.set_xlabel('Error (Radiance - Experimental) [lux]')
+ax.set_ylabel('Frequency')
+ax.set_title('Best Calibration November - November 20\n(τ=0.70, ρ_floor=0.11, ρ_hall=0.17)')
+ax.legend(loc='upper right')
+ax.grid(True, alpha=0.3)
+ax.set_xlim(-xlim, xlim)
+ax.set_ylim(0, ylim_nov)
+plt.tight_layout()
+plt.show()
+```
+
+:::
+
+:::
+
+## Scatter Plots - Original vs Calibrated
 
 ```{python}
 #| label: fig-scatter-comparison
-#| fig-cap: "Scatter plot: Radiance vs Experimental illuminance"
-#| fig-width: 9
-#| fig-height: 4
+#| fig-cap: "Scatter plot with linear fit: Original (top) vs Calibrated (bottom)"
+#| fig-width: 10
+#| fig-height: 8
 
-fig, axes = plt.subplots(1, 2, figsize=(9, 4))
+from scipy import stats
 
-# June 26
+fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+
+# Collect all data
 all_exp_jun = []
-all_rad_jun = []
-for exp_df, rad_df in zip(exp_jun26, rad_jun26):
+all_rad_jun_orig = []
+all_rad_jun_cal = []
+for exp_df, rad_df, rad_cal_df in zip(exp_jun26, rad_jun26, rad_jun26_cal):
     all_exp_jun.extend(exp_df.values.flatten())
-    all_rad_jun.extend(rad_df.values.flatten())
+    all_rad_jun_orig.extend(rad_df.values.flatten())
+    all_rad_jun_cal.extend(rad_cal_df.values.flatten())
 
-# November 20
 all_exp_nov = []
-all_rad_nov = []
-for exp_df, rad_df in zip(exp_nov20, rad_nov20):
+all_rad_nov_orig = []
+all_rad_nov_cal = []
+for exp_df, rad_df, rad_cal_df in zip(exp_nov20, rad_nov20, rad_nov20_cal):
     all_exp_nov.extend(exp_df.values.flatten())
-    all_rad_nov.extend(rad_df.values.flatten())
+    all_rad_nov_orig.extend(rad_df.values.flatten())
+    all_rad_nov_cal.extend(rad_cal_df.values.flatten())
 
-# Calculate global max for both plots
-global_max = max(max(all_exp_jun), max(all_rad_jun), max(all_exp_nov), max(all_rad_nov))
+# Convert to numpy arrays
+all_exp_jun = np.array(all_exp_jun)
+all_rad_jun_orig = np.array(all_rad_jun_orig)
+all_rad_jun_cal = np.array(all_rad_jun_cal)
+all_exp_nov = np.array(all_exp_nov)
+all_rad_nov_orig = np.array(all_rad_nov_orig)
+all_rad_nov_cal = np.array(all_rad_nov_cal)
 
-# June 26 plot
-axes[0].scatter(all_exp_jun, all_rad_jun, alpha=0.3, s=10)
-axes[0].plot([0, global_max], [0, global_max], 'r--', linewidth=2, label='1:1 line')
-axes[0].set_xlabel('Experimental [lux]')
-axes[0].set_ylabel('Radiance [lux]')
-axes[0].set_title('June 26')
-axes[0].legend()
-axes[0].grid(True, alpha=0.3)
-axes[0].set_xlim(0, global_max)
-axes[0].set_ylim(0, global_max)
-axes[0].set_aspect('equal')
+# Calculate global max for all plots
+global_max = max(all_exp_jun.max(), all_rad_jun_orig.max(), all_rad_jun_cal.max(),
+                 all_exp_nov.max(), all_rad_nov_orig.max(), all_rad_nov_cal.max())
 
-# November 20 plot
-axes[1].scatter(all_exp_nov, all_rad_nov, alpha=0.3, s=10)
-axes[1].plot([0, global_max], [0, global_max], 'r--', linewidth=2, label='1:1 line')
-axes[1].set_xlabel('Experimental [lux]')
-axes[1].set_ylabel('Radiance [lux]')
-axes[1].set_title('November 20')
-axes[1].legend()
-axes[1].grid(True, alpha=0.3)
-axes[1].set_xlim(0, global_max)
-axes[1].set_ylim(0, global_max)
-axes[1].set_aspect('equal')
+# Linear fits
+fit_jun_orig = stats.linregress(all_exp_jun, all_rad_jun_orig)
+fit_nov_orig = stats.linregress(all_exp_nov, all_rad_nov_orig)
+fit_jun_cal = stats.linregress(all_exp_jun, all_rad_jun_cal)
+fit_nov_cal = stats.linregress(all_exp_nov, all_rad_nov_cal)
+
+x_fit = np.array([0, global_max])
+
+# Original - June 26
+axes[0, 0].scatter(all_exp_jun, all_rad_jun_orig, alpha=0.3, s=10, color='steelblue')
+axes[0, 0].plot([0, global_max], [0, global_max], 'r--', linewidth=2, label='1:1 line')
+axes[0, 0].plot(x_fit, fit_jun_orig.slope * x_fit + fit_jun_orig.intercept, 'g-', linewidth=2,
+                label=f'Fit: y = {fit_jun_orig.slope:.2f}x + {fit_jun_orig.intercept:.0f}')
+axes[0, 0].set_xlabel('Experimental [lux]')
+axes[0, 0].set_ylabel('Radiance [lux]')
+axes[0, 0].set_title(f'Original - June 26 (R² = {fit_jun_orig.rvalue**2:.3f})')
+axes[0, 0].legend(loc='upper left', fontsize=8)
+axes[0, 0].grid(True, alpha=0.3)
+axes[0, 0].set_xlim(0, global_max)
+axes[0, 0].set_ylim(0, global_max)
+axes[0, 0].set_aspect('equal')
+
+# Original - November 20
+axes[0, 1].scatter(all_exp_nov, all_rad_nov_orig, alpha=0.3, s=10, color='steelblue')
+axes[0, 1].plot([0, global_max], [0, global_max], 'r--', linewidth=2, label='1:1 line')
+axes[0, 1].plot(x_fit, fit_nov_orig.slope * x_fit + fit_nov_orig.intercept, 'g-', linewidth=2,
+                label=f'Fit: y = {fit_nov_orig.slope:.2f}x + {fit_nov_orig.intercept:.0f}')
+axes[0, 1].set_xlabel('Experimental [lux]')
+axes[0, 1].set_ylabel('Radiance [lux]')
+axes[0, 1].set_title(f'Original - November 20 (R² = {fit_nov_orig.rvalue**2:.3f})')
+axes[0, 1].legend(loc='upper left', fontsize=8)
+axes[0, 1].grid(True, alpha=0.3)
+axes[0, 1].set_xlim(0, global_max)
+axes[0, 1].set_ylim(0, global_max)
+axes[0, 1].set_aspect('equal')
+
+# Calibrated - June 26
+axes[1, 0].scatter(all_exp_jun, all_rad_jun_cal, alpha=0.3, s=10, color='darkorange')
+axes[1, 0].plot([0, global_max], [0, global_max], 'r--', linewidth=2, label='1:1 line')
+axes[1, 0].plot(x_fit, fit_jun_cal.slope * x_fit + fit_jun_cal.intercept, 'g-', linewidth=2,
+                label=f'Fit: y = {fit_jun_cal.slope:.2f}x + {fit_jun_cal.intercept:.0f}')
+axes[1, 0].set_xlabel('Experimental [lux]')
+axes[1, 0].set_ylabel('Radiance [lux]')
+axes[1, 0].set_title(f'Calibrated - June 26 (R² = {fit_jun_cal.rvalue**2:.3f})')
+axes[1, 0].legend(loc='upper left', fontsize=8)
+axes[1, 0].grid(True, alpha=0.3)
+axes[1, 0].set_xlim(0, global_max)
+axes[1, 0].set_ylim(0, global_max)
+axes[1, 0].set_aspect('equal')
+
+# Calibrated - November 20
+axes[1, 1].scatter(all_exp_nov, all_rad_nov_cal, alpha=0.3, s=10, color='darkorange')
+axes[1, 1].plot([0, global_max], [0, global_max], 'r--', linewidth=2, label='1:1 line')
+axes[1, 1].plot(x_fit, fit_nov_cal.slope * x_fit + fit_nov_cal.intercept, 'g-', linewidth=2,
+                label=f'Fit: y = {fit_nov_cal.slope:.2f}x + {fit_nov_cal.intercept:.0f}')
+axes[1, 1].set_xlabel('Experimental [lux]')
+axes[1, 1].set_ylabel('Radiance [lux]')
+axes[1, 1].set_title(f'Calibrated - November 20 (R² = {fit_nov_cal.rvalue**2:.3f})')
+axes[1, 1].legend(loc='upper left', fontsize=8)
+axes[1, 1].grid(True, alpha=0.3)
+axes[1, 1].set_xlim(0, global_max)
+axes[1, 1].set_ylim(0, global_max)
+axes[1, 1].set_aspect('equal')
 
 plt.tight_layout()
 plt.show()
 ```
+
+### Linear Regression Summary
+
+```{python}
+#| label: linear-regression-table
+#| output: asis
+
+# Build regression summary table
+regression_data = [
+    {
+        'Simulation': 'Original',
+        'Day': 'June 26',
+        'Slope': round(fit_jun_orig.slope, 3),
+        'Intercept [lux]': round(fit_jun_orig.intercept, 0),
+        'R²': round(fit_jun_orig.rvalue**2, 3),
+        'Std Error': round(fit_jun_orig.stderr, 3)
+    },
+    {
+        'Simulation': 'Original',
+        'Day': 'November 20',
+        'Slope': round(fit_nov_orig.slope, 3),
+        'Intercept [lux]': round(fit_nov_orig.intercept, 0),
+        'R²': round(fit_nov_orig.rvalue**2, 3),
+        'Std Error': round(fit_nov_orig.stderr, 3)
+    },
+    {
+        'Simulation': 'Calibrated',
+        'Day': 'June 26',
+        'Slope': round(fit_jun_cal.slope, 3),
+        'Intercept [lux]': round(fit_jun_cal.intercept, 0),
+        'R²': round(fit_jun_cal.rvalue**2, 3),
+        'Std Error': round(fit_jun_cal.stderr, 3)
+    },
+    {
+        'Simulation': 'Calibrated',
+        'Day': 'November 20',
+        'Slope': round(fit_nov_cal.slope, 3),
+        'Intercept [lux]': round(fit_nov_cal.intercept, 0),
+        'R²': round(fit_nov_cal.rvalue**2, 3),
+        'Std Error': round(fit_nov_cal.stderr, 3)
+    }
+]
+
+regression_df = pd.DataFrame(regression_data)
+print("Linear fit: Radiance = Slope × Experimental + Intercept\n")
+print(regression_df.to_markdown(index=False))
+print("\n\n**Ideal values:** Slope = 1.0, Intercept = 0")
+```
+
+---
+
+# Calibration Comparison
+
+The simulation was calibrated using optimal parameters from an extended parametric grid search (2704 combinations tested). Two calibration strategies are compared:
+
+1. **Calibrated (Combined)**: Optimized for both June 26 and November 20
+2. **Calibrated (November)**: Optimized specifically for November 20 conditions
+
+| Parameter | Original | Calibrated (Combined) | Calibrated (November) |
+|-----------|----------|----------------------|----------------------|
+| Glazing transmittance (τ) | 0.88 | 0.76 | 0.70 |
+| Floor reflectance (ρ_floor) | 0.30 | 0.21 | 0.11 |
+| Hallway reflectance (ρ_hall) | 0.36 | 0.29 | 0.17 |
+
+**Combined optimal metrics**: NMBE = -3.4%, CV(RMSE) = 47.0%, R² = 0.61, GOF = 47.1%
+
+**November optimal metrics** (Nov 20 only): NMBE = +0.8%, CV(RMSE) = 51.4%, R² = 0.40, GOF = 51.5%
+
+## Original vs Calibrated Summary
+
+```{python}
+#| label: comparison-summary
+#| output: asis
+
+def compute_overall_metrics(exp_list, rad_list):
+    """Compute overall metrics for a day"""
+    all_exp = np.concatenate([df.values.flatten() for df in exp_list])
+    all_rad = np.concatenate([df.values.flatten() for df in rad_list])
+    all_err = all_rad - all_exp
+
+    return {
+        'Exp Mean': round(all_exp.mean(), 0),
+        'Sim Mean': round(all_rad.mean(), 0),
+        'MBE [lux]': round(all_err.mean(), 0),
+        'MBE [%]': round(100 * all_err.mean() / all_exp.mean(), 1),
+        'RMSE [lux]': round(np.sqrt((all_err**2).mean()), 0),
+        'CV(RMSE) [%]': round(100 * np.sqrt((all_err**2).mean()) / all_exp.mean(), 1)
+    }
+
+# Compute metrics for all scenarios
+results = []
+
+# June 26 - Original
+m = compute_overall_metrics(exp_jun26, rad_jun26)
+m['Day'] = 'June 26'
+m['Simulation'] = 'Original'
+results.append(m)
+
+# June 26 - Calibrated (Combined)
+m = compute_overall_metrics(exp_jun26, rad_jun26_cal)
+m['Day'] = 'June 26'
+m['Simulation'] = 'Calibrated (Combined)'
+results.append(m)
+
+# November 20 - Original
+m = compute_overall_metrics(exp_nov20, rad_nov20)
+m['Day'] = 'November 20'
+m['Simulation'] = 'Original'
+results.append(m)
+
+# November 20 - Calibrated (Combined)
+m = compute_overall_metrics(exp_nov20, rad_nov20_cal)
+m['Day'] = 'November 20'
+m['Simulation'] = 'Calibrated (Combined)'
+results.append(m)
+
+# June 26 - Calibrated (November-optimized)
+m = compute_overall_metrics(exp_jun26, rad_jun26_cal_nov)
+m['Day'] = 'June 26'
+m['Simulation'] = 'Calibrated (November)'
+results.append(m)
+
+# November 20 - Calibrated (November-optimized)
+m = compute_overall_metrics(exp_nov20, rad_nov20_cal_nov)
+m['Day'] = 'November 20'
+m['Simulation'] = 'Calibrated (November)'
+results.append(m)
+
+comparison_df = pd.DataFrame(results)
+comparison_df = comparison_df[['Day', 'Simulation', 'Exp Mean', 'Sim Mean', 'MBE [lux]', 'MBE [%]', 'RMSE [lux]', 'CV(RMSE) [%]']]
+
+print(comparison_df.to_markdown(index=False))
+```
+
+```{python}
+#| label: fig-comparison-bar
+#| fig-cap: "Comparison of MBE and CV(RMSE) between original and calibrated simulations"
+#| fig-width: 12
+#| fig-height: 5
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+# Compute metrics
+m_jun_orig = compute_overall_metrics(exp_jun26, rad_jun26)
+m_jun_cal = compute_overall_metrics(exp_jun26, rad_jun26_cal)
+m_jun_cal_nov = compute_overall_metrics(exp_jun26, rad_jun26_cal_nov)
+m_nov_orig = compute_overall_metrics(exp_nov20, rad_nov20)
+m_nov_cal = compute_overall_metrics(exp_nov20, rad_nov20_cal)
+m_nov_cal_nov = compute_overall_metrics(exp_nov20, rad_nov20_cal_nov)
+
+# Data for plotting - grouped by day
+categories = ['Jun 26\nOriginal', 'Jun 26\nCal(Comb)', 'Jun 26\nCal(Nov)',
+              'Nov 20\nOriginal', 'Nov 20\nCal(Comb)', 'Nov 20\nCal(Nov)']
+mbe_values = [m_jun_orig['MBE [%]'], m_jun_cal['MBE [%]'], m_jun_cal_nov['MBE [%]'],
+              m_nov_orig['MBE [%]'], m_nov_cal['MBE [%]'], m_nov_cal_nov['MBE [%]']]
+cv_values = [m_jun_orig['CV(RMSE) [%]'], m_jun_cal['CV(RMSE) [%]'], m_jun_cal_nov['CV(RMSE) [%]'],
+             m_nov_orig['CV(RMSE) [%]'], m_nov_cal['CV(RMSE) [%]'], m_nov_cal_nov['CV(RMSE) [%]']]
+
+colors = ['steelblue', 'darkorange', 'forestgreen', 'steelblue', 'darkorange', 'forestgreen']
+x = np.arange(len(categories))
+
+# MBE plot
+bars1 = axes[0].bar(x, mbe_values, color=colors, edgecolor='black', linewidth=0.5)
+axes[0].axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+axes[0].set_ylabel('MBE [%]')
+axes[0].set_title('Mean Bias Error')
+axes[0].set_xticks(x)
+axes[0].set_xticklabels(categories, fontsize=9)
+axes[0].grid(True, alpha=0.3, axis='y')
+
+# Add value labels
+for bar in bars1:
+    height = bar.get_height()
+    va = 'bottom' if height >= 0 else 'top'
+    offset = 3 if height >= 0 else -10
+    axes[0].annotate(f'{height:.1f}%', xy=(bar.get_x() + bar.get_width()/2, height),
+                     xytext=(0, offset), textcoords="offset points", ha='center', fontsize=9, va=va)
+
+# CV(RMSE) plot
+bars2 = axes[1].bar(x, cv_values, color=colors, edgecolor='black', linewidth=0.5)
+axes[1].set_ylabel('CV(RMSE) [%]')
+axes[1].set_title('Coefficient of Variation of RMSE')
+axes[1].set_xticks(x)
+axes[1].set_xticklabels(categories, fontsize=9)
+axes[1].grid(True, alpha=0.3, axis='y')
+
+# Add value labels
+for bar in bars2:
+    height = bar.get_height()
+    axes[1].annotate(f'{height:.1f}%', xy=(bar.get_x() + bar.get_width()/2, height),
+                     xytext=(0, 3), textcoords="offset points", ha='center', fontsize=9)
+
+# Add legend
+from matplotlib.patches import Patch
+legend_elements = [Patch(facecolor='steelblue', edgecolor='black', label='Original'),
+                   Patch(facecolor='darkorange', edgecolor='black', label='Calibrated (Combined)'),
+                   Patch(facecolor='forestgreen', edgecolor='black', label='Calibrated (November)')]
+fig.legend(handles=legend_elements, loc='upper center', ncol=3, bbox_to_anchor=(0.5, 1.02))
+
+plt.tight_layout()
+plt.subplots_adjust(top=0.88)
+plt.show()
+```
+
+---
 
 ## Conclusions
 
 Based on the validation analysis:
 
-1. **Positive Bias**: The Radiance simulation tends to overestimate illuminance values compared to experimental measurements, with mean bias of +487 lux (June 26) and +667 lux (November 20).
+1. **Original Simulation Bias**: The uncalibrated Radiance simulation overestimates illuminance values, with MBE of +25% (June 26) and +43% (November 20).
 
-2. **Relative Error**: The Mean Bias Error (MBE) is approximately +25% for June 26 and +43% for November 20.
+2. **Combined Calibration** (τ=0.76, ρ_floor=0.21, ρ_hall=0.29): Significantly reduces bias for both days, achieving near-zero MBE for the combined dataset.
 
-3. **Coefficient of Variation**: CV(RMSE) values of 52% (June) and 78% (November) indicate moderate to high variability between simulated and measured values.
+3. **November-Specific Calibration** (τ=0.70, ρ_floor=0.11, ρ_hall=0.17): Provides the best fit for November 20 specifically, with MBE near zero and improved R².
+
+4. **Seasonal Variation**: The optimal calibration parameters differ between summer (June) and winter (November), suggesting that a single calibration may not be ideal for all conditions. November requires lower effective transmittance and reflectance values.
+
+5. **CV(RMSE) Limitation**: Even with calibration, CV(RMSE) remains above 40%, indicating significant point-to-point variability that cannot be eliminated by material property adjustments alone. This is likely due to unmodeled furniture, occupants, and local obstructions.
 
 4. **Spatial Patterns**: Both simulation and measurements show similar spatial distribution patterns, with higher illuminance near windows and lower values in the interior.

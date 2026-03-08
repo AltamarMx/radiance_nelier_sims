@@ -10,12 +10,15 @@ Completed annual daylighting simulation for a building exported from DesignBuild
 
 ```
 edificio/
-├── materials.rad              # Material definitions
+├── materials.rad              # Material definitions (original)
+├── materials_calibrated.rad   # Calibrated material definitions
 ├── scene.rad                  # Scene description
 ├── points.txt                 # Sensor grid (480 points)
 ├── points_validation.txt      # Validation sensor grid (63 points)
 ├── run_simulation.sh          # Full simulation workflow script
 ├── run_simulation_validation.sh  # Validation grid simulation script
+├── run_simulation_validation_calibrated.sh  # Calibrated validation simulation
+├── run_parametric_single.py   # Single parametric simulation script
 ├── generate_sensor_grid.py    # Sensor grid generator
 ├── generate_sensor_grid_validation.py  # Validation grid generator
 ├── visualize_illuminance.py   # Single-time visualization script
@@ -32,15 +35,26 @@ edificio/
 │   └── nelier_annual.smx     # Annual sky matrix (8760 × 146)
 ├── matrices/dc/
 │   ├── illum.mtx             # Daylight coefficient matrix (480 × 146)
-│   └── illum_validation.mtx  # Validation DC matrix (63 × 146)
+│   ├── illum_validation.mtx  # Validation DC matrix (63 × 146)
+│   └── illum_validation_calibrated.mtx  # Calibrated validation DC matrix
 ├── octrees/
-│   └── scene.oct             # Compiled octree
+│   ├── scene.oct             # Compiled octree (original materials)
+│   └── scene_calibrated.oct  # Compiled octree (calibrated materials)
 ├── results/dc/
 │   ├── annual.ill            # Annual illuminance (8760 × 480)
-│   └── annual_validation.ill # Validation annual illuminance (8760 × 63)
+│   ├── annual_validation.ill # Validation annual illuminance (8760 × 63)
+│   └── annual_validation_calibrated.ill  # Calibrated validation illuminance
+├── results/parametric/        # Parametric calibration results
+│   ├── grid_results.csv      # All grid search results
+│   └── optimal_parameters.json  # Best parameters found
 └── assets/
     ├── nelier_26jun_20novCST.epw  # Weather file
     └── nelier.wea                  # Converted WEA format
+
+report/
+├── validation_report.qmd      # Validation report (original vs calibrated)
+├── parametric_calibration.qmd # Parametric calibration analysis
+└── MATERIALS.md               # Materials documentation
 ```
 
 ## Simulation Parameters
@@ -278,11 +292,16 @@ Visualizations use discrete illuminance levels:
 | `annual.ill` | 63 MB | Hourly illuminance (8760 × 480) |
 | `illum.mtx` | 2.7 MB | Daylight coefficients (480 × 146) |
 | `nelier_annual.smx` | 13 MB | Annual sky matrix (8760 × 146) |
-| `scene.oct` | 2.3 MB | Compiled geometry |
+| `scene.oct` | 2.3 MB | Compiled geometry (original) |
+| `scene_calibrated.oct` | 2.3 MB | Compiled geometry (calibrated) |
 | `points.txt` | 15 KB | Sensor positions |
 | `annual_validation.ill` | 8 MB | Validation hourly illuminance (8760 × 63) |
+| `annual_validation_calibrated.ill` | 8 MB | Calibrated validation illuminance (8760 × 63) |
 | `illum_validation.mtx` | 111 KB | Validation DC matrix (63 × 146) |
+| `illum_validation_calibrated.mtx` | 111 KB | Calibrated validation DC matrix (63 × 146) |
 | `points_validation.txt` | 2 KB | Validation sensor positions (63 points) |
+| `materials.rad` | 1 KB | Original material definitions |
+| `materials_calibrated.rad` | 1 KB | Calibrated material definitions |
 
 ---
 
@@ -383,4 +402,162 @@ T   │  o   o   o   o   o   o   o  │  T
     7 columns (X direction): 1.17m to 7.65m
     9 rows (Y direction): -9.14m to -0.50m
     Spacing: 1.08m in both directions
+```
+
+---
+
+## Calibrated Simulation
+
+A calibrated version of the simulation adjusts material properties to account for real-world conditions not explicitly modeled (furniture, frame obstruction, etc.).
+
+### Calibration Parameters
+
+Optimal parameters from parametric grid search (88 combinations tested):
+
+| Parameter | Original | Calibrated | Justification |
+|-----------|----------|------------|---------------|
+| Floor reflectance (PISO-CONCRETO-PULIDOIER) | 0.30 | 0.12 | Pupitres (desks) cover floor area |
+| Glazing transmittance | 0.88 | 0.77 | Window frame obstruction + dirt |
+
+### Calibrated Files
+
+```
+edificio/
+├── materials_calibrated.rad                # Calibrated material definitions
+├── run_simulation_validation_calibrated.sh # Calibrated simulation script
+├── octrees/
+│   └── scene_calibrated.oct               # Octree with calibrated materials
+├── matrices/dc/
+│   └── illum_validation_calibrated.mtx    # Calibrated DC matrix (63 × 146)
+└── results/dc/
+    └── annual_validation_calibrated.ill   # Calibrated annual illuminance (8760 × 63)
+```
+
+### Run Calibrated Validation Simulation
+
+```bash
+cd edificio
+bash run_simulation_validation_calibrated.sh
+```
+
+This runs:
+1. Generate validation sensor grid (points_validation.txt)
+2. Build octree with calibrated materials (scene_calibrated.oct)
+3. Calculate daylight coefficients (illum_validation_calibrated.mtx)
+4. Generate annual illuminance (annual_validation_calibrated.ill)
+
+### Reading Calibrated Data
+
+```python
+import numpy as np
+
+# Load calibrated validation data
+data_cal = np.loadtxt('edificio/results/dc/annual_validation_calibrated.ill', skiprows=11)
+# Shape: (8760, 63) - hours × sensors
+
+# Compare with original
+data_orig = np.loadtxt('edificio/results/dc/annual_validation.ill', skiprows=11)
+```
+
+### Validation Report
+
+The validation report compares both original and calibrated simulations against experimental measurements:
+
+```bash
+cd report
+quarto render validation_report.qmd
+```
+
+The report includes:
+- Contour maps for Original, Experimental, and Calibrated data
+- Hourly metrics tables with averages
+- Side-by-side comparison of Original vs Calibrated results
+- Bar charts comparing MBE and CV(RMSE)
+
+---
+
+## Parametric Calibration
+
+A parametric exploration finds the optimal combination of glazing transmittance (τ) and floor reflectance (ρ) that minimizes error between simulation and experimental measurements.
+
+### Optimization Target
+
+Combined error with equal weights:
+```
+Combined_Error = 0.25 × |MBE_jun%| + 0.25 × |MBE_nov%| + 0.25 × CV_jun% + 0.25 × CV_nov%
+```
+
+### Parameter Grid
+
+| Parameter | Min | Max | Step | Values |
+|-----------|-----|-----|------|--------|
+| τ (transmittance) | 0.65 | 0.85 | 0.02 | 11 values |
+| ρ (floor reflectance) | 0.10 | 0.25 | 0.02 | 8 values |
+
+**Total combinations**: 11 × 8 = 88 simulations
+
+### Parametric Files
+
+```
+edificio/
+├── run_parametric_single.py          # Single-point simulation script
+├── run_parametric_grid.py            # Grid search execution script
+└── results/parametric/
+    ├── grid_results.csv              # All grid search results
+    ├── optimal_parameters.json       # Best parameters found
+    └── annual_parametric.ill         # Temporary simulation output
+
+report/
+└── parametric_calibration.qmd        # Analysis and visualization document
+```
+
+### Run Parametric Calibration
+
+**Step 1: Run grid search** (88 simulations, ~3-4 hours)
+```bash
+cd edificio
+uv run python run_parametric_grid.py
+```
+
+**Step 2: Generate analysis report**
+```bash
+cd report
+quarto render parametric_calibration.qmd
+```
+
+The report includes:
+- Combined error heatmap with optimal point marked
+- Individual metric heatmaps (MBE, CV(RMSE) for each day)
+- Sensitivity analysis plots
+- Top 10 parameter combinations table
+- Comparison with current calibration
+
+### Run Single Parametric Simulation
+
+For testing individual parameter combinations:
+
+```bash
+cd edificio
+uv run python run_parametric_single.py --transmittance 0.75 --reflectance 0.15
+```
+
+Output is JSON with error metrics for both measurement days.
+
+### Reading Parametric Results
+
+```python
+import pandas as pd
+import json
+
+# Load grid search results
+results = pd.read_csv('edificio/results/parametric/grid_results.csv')
+
+# Find optimal parameters
+optimal_idx = results['combined_error'].idxmin()
+optimal = results.loc[optimal_idx]
+print(f"Optimal: τ={optimal['transmittance']:.2f}, ρ={optimal['reflectance']:.2f}")
+
+# Load optimal parameters
+with open('edificio/results/parametric/optimal_parameters.json') as f:
+    optimal_params = json.load(f)
 ```

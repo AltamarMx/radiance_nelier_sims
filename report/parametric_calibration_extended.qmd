@@ -1,0 +1,642 @@
+---
+title: "Extended Parametric Calibration of Radiance Daylighting Simulation"
+subtitle: "Three-Parameter Grid Search with ASHRAE-Compliant Metrics"
+author: "Radiance Simulation Study"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+
+## Introduction
+
+This document presents the analysis of an extended parametric exploration including three calibration parameters:
+
+1. **Glazing transmittance (τ)**: Effective transmittance accounting for frame obstruction and dirt
+2. **Floor reflectance (ρ_floor)**: Effective reflectance accounting for furniture coverage
+3. **Hallway reflectance (ρ_hall)**: Effective reflectance of hallway floor area
+
+### ASHRAE-Compliant Metrics
+
+| Metric | Formula | ASHRAE Threshold |
+|--------|---------|------------------|
+| **NMBE** | [Σ(E_meas - E_sim) / (n × Ē_meas)] × 100% | ≤ ±10% |
+| **CV(RMSE)** | (RMSE / Ē_meas) × 100% | ≤ 30% |
+| **R²** | 1 - [Σ(E_meas - E_sim)² / Σ(E_meas - Ē_meas)²] | > 0.85 |
+| **GOF** | √(NMBE² + CV(RMSE)²) | Minimize |
+
+**Note**: NMBE positive = simulation underestimates measurements
+
+### Parameter Ranges
+
+| Parameter | Measured | Min | Max | Step | Values |
+|-----------|----------|-----|-----|------|--------|
+| τ (transmittance) | 0.88 | 0.58 | 0.88 | 0.02 | 16 |
+| ρ_floor | 0.30 | 0.05 | 0.30 | 0.02 | 13 |
+| ρ_hall | 0.36 | 0.11 | 0.36 | 0.02 | 13 |
+
+**Total combinations**: 16 × 13 × 13 = **2704 simulations**
+
+---
+
+## Load Results
+
+```{python}
+#| label: setup
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import json
+from pathlib import Path
+import warnings
+warnings.filterwarnings('ignore')
+
+# Set plot style
+plt.rcParams['figure.dpi'] = 100
+plt.rcParams['savefig.dpi'] = 150
+
+# Paths
+RESULTS_DIR = Path("../edificio/results/parametric")
+results_file = RESULTS_DIR / "grid_results_extended.csv"
+optimal_file = RESULTS_DIR / "optimal_parameters_extended.json"
+
+# Load results
+if not results_file.exists():
+    raise FileNotFoundError(
+        f"Results file not found: {results_file}\n"
+        "Run the grid search first:\n"
+        "  cd edificio && uv run python run_parametric_grid_extended.py"
+    )
+
+results_df = pd.read_csv(results_file)
+results_df = results_df[results_df['success'] == True].copy()
+
+print(f"Loaded {len(results_df)} successful simulations")
+
+# Extract grid parameters from data
+TAU_VALUES = np.sort(results_df['tau'].unique())
+RHO_FLOOR_VALUES = np.sort(results_df['rho_floor'].unique())
+RHO_HALL_VALUES = np.sort(results_df['rho_hall'].unique())
+
+print(f"τ values: {len(TAU_VALUES)} ({TAU_VALUES[0]:.2f} - {TAU_VALUES[-1]:.2f})")
+print(f"ρ_floor values: {len(RHO_FLOOR_VALUES)} ({RHO_FLOOR_VALUES[0]:.2f} - {RHO_FLOOR_VALUES[-1]:.2f})")
+print(f"ρ_hall values: {len(RHO_HALL_VALUES)} ({RHO_HALL_VALUES[0]:.2f} - {RHO_HALL_VALUES[-1]:.2f})")
+```
+
+---
+
+## Optimal Parameters
+
+```{python}
+#| label: results-summary
+
+# Find optimal parameters (minimize GOF)
+optimal_idx = results_df['gof'].idxmin()
+optimal = results_df.loc[optimal_idx]
+
+print("=" * 70)
+print("OPTIMAL PARAMETERS (Minimum GOF)")
+print("=" * 70)
+print(f"  Glazing transmittance (τ):   {optimal['tau']:.2f}")
+print(f"  Floor reflectance (ρ_floor): {optimal['rho_floor']:.2f}")
+print(f"  Hallway reflectance (ρ_hall): {optimal['rho_hall']:.2f}")
+print()
+print("Combined Metrics:")
+print(f"  NMBE:      {optimal['nmbe_combined']:+.2f}%")
+print(f"  CV(RMSE):  {optimal['cvrmse_combined']:.2f}%")
+print(f"  R²:        {optimal['r2_combined']:.3f}")
+print(f"  GOF:       {optimal['gof']:.2f}%")
+print()
+print("June 26 Metrics:")
+print(f"  NMBE:      {optimal['nmbe_jun']:+.2f}%")
+print(f"  CV(RMSE):  {optimal['cvrmse_jun']:.2f}%")
+print(f"  R²:        {optimal['r2_jun']:.3f}")
+print()
+print("November 20 Metrics:")
+print(f"  NMBE:      {optimal['nmbe_nov']:+.2f}%")
+print(f"  CV(RMSE):  {optimal['cvrmse_nov']:.2f}%")
+print(f"  R²:        {optimal['r2_nov']:.3f}")
+print()
+print("ASHRAE Compliance:", "YES" if optimal['meets_ashrae'] else "NO")
+print("=" * 70)
+```
+
+### ASHRAE Compliance Check
+
+```{python}
+#| label: ashrae-compliance
+#| output: asis
+
+# Filter ASHRAE-compliant solutions
+ashrae_compliant = results_df[results_df['meets_ashrae'] == True].copy()
+n_compliant = len(ashrae_compliant)
+n_total = len(results_df)
+pct_compliant = 100 * n_compliant / n_total
+
+print(f"**ASHRAE-compliant solutions**: {n_compliant} of {n_total} ({pct_compliant:.1f}%)")
+print()
+
+if n_compliant > 0:
+    print("### Top 10 ASHRAE-Compliant Solutions")
+    print()
+    top10_ashrae = ashrae_compliant.nsmallest(10, 'gof')[
+        ['tau', 'rho_floor', 'rho_hall', 'nmbe_combined', 'cvrmse_combined', 'r2_combined', 'gof']
+    ].copy()
+    top10_ashrae.columns = ['τ', 'ρ_floor', 'ρ_hall', 'NMBE [%]', 'CV(RMSE) [%]', 'R²', 'GOF [%]']
+    top10_ashrae = top10_ashrae.round({'τ': 2, 'ρ_floor': 2, 'ρ_hall': 2,
+                                       'NMBE [%]': 2, 'CV(RMSE) [%]': 2, 'R²': 3, 'GOF [%]': 2})
+    top10_ashrae.index = range(1, len(top10_ashrae) + 1)
+    top10_ashrae.index.name = 'Rank'
+    print(top10_ashrae.to_markdown())
+else:
+    print("*No solutions meet ASHRAE Guideline 14 thresholds (|NMBE| ≤ 10%, CV(RMSE) ≤ 30%).*")
+```
+
+### Top 10 Parameter Combinations (by GOF)
+
+```{python}
+#| label: top-10
+#| output: asis
+
+top10 = results_df.nsmallest(10, 'gof')[
+    ['tau', 'rho_floor', 'rho_hall', 'nmbe_combined', 'cvrmse_combined', 'r2_combined', 'gof', 'meets_ashrae']
+].copy()
+
+# Convert boolean to Yes/No
+top10['meets_ashrae'] = top10['meets_ashrae'].apply(lambda x: 'Yes' if x else 'No')
+
+top10.columns = ['τ', 'ρ_floor', 'ρ_hall', 'NMBE [%]', 'CV(RMSE) [%]', 'R²', 'GOF [%]', 'ASHRAE']
+top10 = top10.round({'τ': 2, 'ρ_floor': 2, 'ρ_hall': 2,
+                     'NMBE [%]': 2, 'CV(RMSE) [%]': 2, 'R²': 3, 'GOF [%]': 2})
+top10.index = range(1, 11)
+top10.index.name = 'Rank'
+
+print(top10.to_markdown())
+```
+
+---
+
+## Visualizations
+
+### GOF Heatmaps (2D Slices)
+
+```{python}
+#| label: fig-heatmap-gof-slices
+#| fig-cap: "GOF vs parameter pairs at optimal slice values"
+#| fig-width: 14
+#| fig-height: 4
+
+fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+
+# Slice 1: GOF vs (τ, ρ_floor) at optimal ρ_hall
+opt_rho_hall = optimal['rho_hall']
+slice1 = results_df[np.isclose(results_df['rho_hall'], opt_rho_hall, atol=0.001)]
+if len(slice1) > 0:
+    pivot1 = slice1.pivot(index='rho_floor', columns='tau', values='gof')
+    im1 = axes[0].imshow(pivot1.values, cmap='viridis_r', aspect='auto',
+                         extent=[TAU_VALUES[0]-0.01, TAU_VALUES[-1]+0.01,
+                                RHO_FLOOR_VALUES[0]-0.01, RHO_FLOOR_VALUES[-1]+0.01],
+                         origin='lower')
+    plt.colorbar(im1, ax=axes[0], label='GOF [%]')
+    axes[0].plot(optimal['tau'], optimal['rho_floor'], 'r*', markersize=15,
+                 markeredgecolor='white', markeredgewidth=1.5)
+    axes[0].set_xlabel('τ (Glazing Transmittance)')
+    axes[0].set_ylabel('ρ_floor (Floor Reflectance)')
+    axes[0].set_title(f'GOF vs (τ, ρ_floor) at ρ_hall = {opt_rho_hall:.2f}')
+
+# Slice 2: GOF vs (τ, ρ_hall) at optimal ρ_floor
+opt_rho_floor = optimal['rho_floor']
+slice2 = results_df[np.isclose(results_df['rho_floor'], opt_rho_floor, atol=0.001)]
+if len(slice2) > 0:
+    pivot2 = slice2.pivot(index='rho_hall', columns='tau', values='gof')
+    im2 = axes[1].imshow(pivot2.values, cmap='viridis_r', aspect='auto',
+                         extent=[TAU_VALUES[0]-0.01, TAU_VALUES[-1]+0.01,
+                                RHO_HALL_VALUES[0]-0.01, RHO_HALL_VALUES[-1]+0.01],
+                         origin='lower')
+    plt.colorbar(im2, ax=axes[1], label='GOF [%]')
+    axes[1].plot(optimal['tau'], optimal['rho_hall'], 'r*', markersize=15,
+                 markeredgecolor='white', markeredgewidth=1.5)
+    axes[1].set_xlabel('τ (Glazing Transmittance)')
+    axes[1].set_ylabel('ρ_hall (Hallway Reflectance)')
+    axes[1].set_title(f'GOF vs (τ, ρ_hall) at ρ_floor = {opt_rho_floor:.2f}')
+
+# Slice 3: GOF vs (ρ_floor, ρ_hall) at optimal τ
+opt_tau = optimal['tau']
+slice3 = results_df[np.isclose(results_df['tau'], opt_tau, atol=0.001)]
+if len(slice3) > 0:
+    pivot3 = slice3.pivot(index='rho_hall', columns='rho_floor', values='gof')
+    im3 = axes[2].imshow(pivot3.values, cmap='viridis_r', aspect='auto',
+                         extent=[RHO_FLOOR_VALUES[0]-0.01, RHO_FLOOR_VALUES[-1]+0.01,
+                                RHO_HALL_VALUES[0]-0.01, RHO_HALL_VALUES[-1]+0.01],
+                         origin='lower')
+    plt.colorbar(im3, ax=axes[2], label='GOF [%]')
+    axes[2].plot(optimal['rho_floor'], optimal['rho_hall'], 'r*', markersize=15,
+                 markeredgecolor='white', markeredgewidth=1.5)
+    axes[2].set_xlabel('ρ_floor (Floor Reflectance)')
+    axes[2].set_ylabel('ρ_hall (Hallway Reflectance)')
+    axes[2].set_title(f'GOF vs (ρ_floor, ρ_hall) at τ = {opt_tau:.2f}')
+
+plt.tight_layout()
+plt.show()
+```
+
+### NMBE and CV(RMSE) Heatmaps
+
+```{python}
+#| label: fig-heatmaps-metrics
+#| fig-cap: "NMBE and CV(RMSE) vs (τ, ρ_floor) at optimal ρ_hall"
+#| fig-width: 12
+#| fig-height: 10
+
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+opt_rho_hall = optimal['rho_hall']
+slice_data = results_df[np.isclose(results_df['rho_hall'], opt_rho_hall, atol=0.001)]
+
+if len(slice_data) > 0:
+    metrics = [
+        ('nmbe_jun', 'NMBE June 26 [%]', 'RdBu_r'),
+        ('nmbe_nov', 'NMBE November 20 [%]', 'RdBu_r'),
+        ('cvrmse_jun', 'CV(RMSE) June 26 [%]', 'viridis_r'),
+        ('cvrmse_nov', 'CV(RMSE) November 20 [%]', 'viridis_r')
+    ]
+
+    for ax, (metric, title, cmap) in zip(axes.flat, metrics):
+        pivot = slice_data.pivot(index='rho_floor', columns='tau', values=metric)
+
+        if 'NMBE' in title:
+            vmax = max(abs(pivot.values.min()), abs(pivot.values.max()))
+            im = ax.imshow(pivot.values, cmap=cmap, aspect='auto',
+                          extent=[TAU_VALUES[0]-0.01, TAU_VALUES[-1]+0.01,
+                                 RHO_FLOOR_VALUES[0]-0.01, RHO_FLOOR_VALUES[-1]+0.01],
+                          origin='lower', vmin=-vmax, vmax=vmax)
+        else:
+            im = ax.imshow(pivot.values, cmap=cmap, aspect='auto',
+                          extent=[TAU_VALUES[0]-0.01, TAU_VALUES[-1]+0.01,
+                                 RHO_FLOOR_VALUES[0]-0.01, RHO_FLOOR_VALUES[-1]+0.01],
+                          origin='lower')
+
+        plt.colorbar(im, ax=ax, label=title)
+        ax.plot(optimal['tau'], optimal['rho_floor'], 'r*', markersize=12,
+                markeredgecolor='white', markeredgewidth=1)
+        ax.set_xlabel('τ (Glazing Transmittance)')
+        ax.set_ylabel('ρ_floor (Floor Reflectance)')
+        ax.set_title(f'{title} (at ρ_hall = {opt_rho_hall:.2f})')
+
+plt.suptitle('Metrics at Optimal Hallway Reflectance', y=1.02)
+plt.tight_layout()
+plt.show()
+```
+
+### R² Heatmap
+
+```{python}
+#| label: fig-heatmap-r2
+#| fig-cap: "R² vs (τ, ρ_floor) at optimal ρ_hall"
+#| fig-width: 8
+#| fig-height: 6
+
+fig, ax = plt.subplots(figsize=(8, 6))
+
+opt_rho_hall = optimal['rho_hall']
+slice_data = results_df[np.isclose(results_df['rho_hall'], opt_rho_hall, atol=0.001)]
+
+if len(slice_data) > 0:
+    pivot = slice_data.pivot(index='rho_floor', columns='tau', values='r2_combined')
+
+    im = ax.imshow(pivot.values, cmap='RdYlGn', aspect='auto',
+                  extent=[TAU_VALUES[0]-0.01, TAU_VALUES[-1]+0.01,
+                         RHO_FLOOR_VALUES[0]-0.01, RHO_FLOOR_VALUES[-1]+0.01],
+                  origin='lower', vmin=0.5, vmax=1.0)
+
+    plt.colorbar(im, ax=ax, label='R²')
+
+    # Add contour at R² = 0.85 (ASHRAE threshold)
+    X, Y = np.meshgrid(TAU_VALUES, RHO_FLOOR_VALUES)
+    contour = ax.contour(X, Y, pivot.values, levels=[0.85], colors='black', linewidths=2)
+    ax.clabel(contour, inline=True, fontsize=10, fmt='R²=%.2f')
+
+    ax.plot(optimal['tau'], optimal['rho_floor'], 'r*', markersize=15,
+            markeredgecolor='white', markeredgewidth=1.5, label='Optimal')
+
+    ax.set_xlabel('τ (Glazing Transmittance)')
+    ax.set_ylabel('ρ_floor (Floor Reflectance)')
+    ax.set_title(f'Combined R² at ρ_hall = {opt_rho_hall:.2f}')
+    ax.legend()
+
+plt.tight_layout()
+plt.show()
+```
+
+### Sensitivity Analysis
+
+```{python}
+#| label: fig-sensitivity
+#| fig-cap: "Sensitivity of GOF to each parameter"
+#| fig-width: 12
+#| fig-height: 4
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+
+# Sensitivity to τ (at optimal ρ_floor, ρ_hall)
+tau_sens = results_df[
+    np.isclose(results_df['rho_floor'], optimal['rho_floor'], atol=0.001) &
+    np.isclose(results_df['rho_hall'], optimal['rho_hall'], atol=0.001)
+].sort_values('tau')
+
+if len(tau_sens) > 0:
+    axes[0].plot(tau_sens['tau'], tau_sens['gof'], 'b-o', linewidth=2, markersize=6)
+    axes[0].axvline(optimal['tau'], color='red', linestyle='--',
+                    label=f"Optimal τ = {optimal['tau']:.2f}")
+    axes[0].set_xlabel('τ (Glazing Transmittance)')
+    axes[0].set_ylabel('GOF [%]')
+    axes[0].set_title(f"Sensitivity to τ\n(ρ_floor={optimal['rho_floor']:.2f}, ρ_hall={optimal['rho_hall']:.2f})")
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+# Sensitivity to ρ_floor (at optimal τ, ρ_hall)
+rho_floor_sens = results_df[
+    np.isclose(results_df['tau'], optimal['tau'], atol=0.001) &
+    np.isclose(results_df['rho_hall'], optimal['rho_hall'], atol=0.001)
+].sort_values('rho_floor')
+
+if len(rho_floor_sens) > 0:
+    axes[1].plot(rho_floor_sens['rho_floor'], rho_floor_sens['gof'], 'g-o', linewidth=2, markersize=6)
+    axes[1].axvline(optimal['rho_floor'], color='red', linestyle='--',
+                    label=f"Optimal ρ_floor = {optimal['rho_floor']:.2f}")
+    axes[1].set_xlabel('ρ_floor (Floor Reflectance)')
+    axes[1].set_ylabel('GOF [%]')
+    axes[1].set_title(f"Sensitivity to ρ_floor\n(τ={optimal['tau']:.2f}, ρ_hall={optimal['rho_hall']:.2f})")
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+
+# Sensitivity to ρ_hall (at optimal τ, ρ_floor)
+rho_hall_sens = results_df[
+    np.isclose(results_df['tau'], optimal['tau'], atol=0.001) &
+    np.isclose(results_df['rho_floor'], optimal['rho_floor'], atol=0.001)
+].sort_values('rho_hall')
+
+if len(rho_hall_sens) > 0:
+    axes[2].plot(rho_hall_sens['rho_hall'], rho_hall_sens['gof'], 'm-o', linewidth=2, markersize=6)
+    axes[2].axvline(optimal['rho_hall'], color='red', linestyle='--',
+                    label=f"Optimal ρ_hall = {optimal['rho_hall']:.2f}")
+    axes[2].set_xlabel('ρ_hall (Hallway Reflectance)')
+    axes[2].set_ylabel('GOF [%]')
+    axes[2].set_title(f"Sensitivity to ρ_hall\n(τ={optimal['tau']:.2f}, ρ_floor={optimal['rho_floor']:.2f})")
+    axes[2].legend()
+    axes[2].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+### Parameter Contribution Analysis
+
+```{python}
+#| label: fig-contribution
+#| fig-cap: "Relative contribution of each parameter to GOF variation"
+#| fig-width: 8
+#| fig-height: 5
+
+# Compute parameter contributions using variance decomposition
+# Hold two parameters at optimal, vary the third
+gof_range_tau = tau_sens['gof'].max() - tau_sens['gof'].min() if len(tau_sens) > 0 else 0
+gof_range_rho_floor = rho_floor_sens['gof'].max() - rho_floor_sens['gof'].min() if len(rho_floor_sens) > 0 else 0
+gof_range_rho_hall = rho_hall_sens['gof'].max() - rho_hall_sens['gof'].min() if len(rho_hall_sens) > 0 else 0
+
+total_range = gof_range_tau + gof_range_rho_floor + gof_range_rho_hall
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+params = ['τ (Transmittance)', 'ρ_floor', 'ρ_hall']
+contributions = [gof_range_tau, gof_range_rho_floor, gof_range_rho_hall]
+colors = ['steelblue', 'seagreen', 'darkorchid']
+
+bars = ax.bar(params, contributions, color=colors, edgecolor='black', linewidth=1)
+
+for bar, contrib in zip(bars, contributions):
+    height = bar.get_height()
+    pct = 100 * contrib / total_range if total_range > 0 else 0
+    ax.annotate(f'{contrib:.1f}%\n({pct:.0f}%)',
+                xy=(bar.get_x() + bar.get_width()/2, height),
+                xytext=(0, 5), textcoords="offset points",
+                ha='center', fontsize=11)
+
+ax.set_ylabel('GOF Range [%]')
+ax.set_title('Parameter Contribution to GOF Variation\n(Range when varying each parameter at optimal values of others)')
+ax.grid(True, alpha=0.3, axis='y')
+
+plt.tight_layout()
+plt.show()
+
+print(f"\nParameter sensitivity ranking:")
+ranking = sorted(zip(params, contributions), key=lambda x: x[1], reverse=True)
+for i, (param, contrib) in enumerate(ranking, 1):
+    pct = 100 * contrib / total_range if total_range > 0 else 0
+    print(f"  {i}. {param}: {contrib:.1f}% GOF range ({pct:.0f}% of total)")
+```
+
+---
+
+## Comparison: Original vs Optimal
+
+```{python}
+#| label: comparison-table
+#| output: asis
+
+# Reference values (original/measured)
+original = {'tau': 0.88, 'rho_floor': 0.30, 'rho_hall': 0.36}
+
+# Try to find original in results
+original_result = results_df[
+    np.isclose(results_df['tau'], original['tau'], atol=0.015) &
+    np.isclose(results_df['rho_floor'], original['rho_floor'], atol=0.015) &
+    np.isclose(results_df['rho_hall'], original['rho_hall'], atol=0.015)
+]
+
+comparison_data = {
+    'Parameter': [
+        'Glazing transmittance (τ)',
+        'Floor reflectance (ρ_floor)',
+        'Hallway reflectance (ρ_hall)',
+        'NMBE [%]',
+        'CV(RMSE) [%]',
+        'R²',
+        'GOF [%]',
+        'ASHRAE Compliant'
+    ],
+    'Original (Measured)': [
+        f"{original['tau']:.2f}",
+        f"{original['rho_floor']:.2f}",
+        f"{original['rho_hall']:.2f}",
+        f"{original_result['nmbe_combined'].values[0]:+.2f}" if len(original_result) > 0 else '-',
+        f"{original_result['cvrmse_combined'].values[0]:.2f}" if len(original_result) > 0 else '-',
+        f"{original_result['r2_combined'].values[0]:.3f}" if len(original_result) > 0 else '-',
+        f"{original_result['gof'].values[0]:.2f}" if len(original_result) > 0 else '-',
+"Yes" if len(original_result) > 0 and original_result['meets_ashrae'].values[0] else "No" if len(original_result) > 0 else '-'
+    ],
+    'Optimal (Calibrated)': [
+        f"{optimal['tau']:.2f}",
+        f"{optimal['rho_floor']:.2f}",
+        f"{optimal['rho_hall']:.2f}",
+        f"{optimal['nmbe_combined']:+.2f}",
+        f"{optimal['cvrmse_combined']:.2f}",
+        f"{optimal['r2_combined']:.3f}",
+        f"{optimal['gof']:.2f}",
+        "Yes" if optimal['meets_ashrae'] else "No"
+    ]
+}
+
+comparison_df = pd.DataFrame(comparison_data)
+# Ensure all columns are strings to avoid tabulate issues
+comparison_df = comparison_df.astype(str)
+print(comparison_df.to_markdown(index=False))
+```
+
+### Metrics Comparison by Day
+
+```{python}
+#| label: fig-comparison-bar
+#| fig-cap: "Comparison of error metrics: Original vs Optimal"
+#| fig-width: 12
+#| fig-height: 5
+
+if len(original_result) > 0:
+    orig = original_result.iloc[0]
+
+    fig, axes = plt.subplots(1, 3, figsize=(12, 5))
+
+    days = ['June 26', 'November 20', 'Combined']
+    x = np.arange(len(days))
+    width = 0.35
+
+    # NMBE comparison
+    orig_nmbe = [orig['nmbe_jun'], orig['nmbe_nov'], orig['nmbe_combined']]
+    opt_nmbe = [optimal['nmbe_jun'], optimal['nmbe_nov'], optimal['nmbe_combined']]
+
+    bars1 = axes[0].bar(x - width/2, orig_nmbe, width, label='Original', color='steelblue')
+    bars2 = axes[0].bar(x + width/2, opt_nmbe, width, label='Optimal', color='darkorange')
+    axes[0].axhline(0, color='black', linestyle='-', linewidth=0.5)
+    axes[0].axhline(10, color='green', linestyle='--', alpha=0.5, label='ASHRAE ±10%')
+    axes[0].axhline(-10, color='green', linestyle='--', alpha=0.5)
+    axes[0].set_ylabel('NMBE [%]')
+    axes[0].set_title('Normalized Mean Bias Error')
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(days)
+    axes[0].legend(loc='upper right')
+    axes[0].grid(True, alpha=0.3, axis='y')
+
+    # CV(RMSE) comparison
+    orig_cv = [orig['cvrmse_jun'], orig['cvrmse_nov'], orig['cvrmse_combined']]
+    opt_cv = [optimal['cvrmse_jun'], optimal['cvrmse_nov'], optimal['cvrmse_combined']]
+
+    bars3 = axes[1].bar(x - width/2, orig_cv, width, label='Original', color='steelblue')
+    bars4 = axes[1].bar(x + width/2, opt_cv, width, label='Optimal', color='darkorange')
+    axes[1].axhline(30, color='green', linestyle='--', alpha=0.5, label='ASHRAE 30%')
+    axes[1].set_ylabel('CV(RMSE) [%]')
+    axes[1].set_title('Coefficient of Variation of RMSE')
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(days)
+    axes[1].legend(loc='upper right')
+    axes[1].grid(True, alpha=0.3, axis='y')
+
+    # R² comparison
+    orig_r2 = [orig['r2_jun'], orig['r2_nov'], orig['r2_combined']]
+    opt_r2 = [optimal['r2_jun'], optimal['r2_nov'], optimal['r2_combined']]
+
+    bars5 = axes[2].bar(x - width/2, orig_r2, width, label='Original', color='steelblue')
+    bars6 = axes[2].bar(x + width/2, opt_r2, width, label='Optimal', color='darkorange')
+    axes[2].axhline(0.85, color='green', linestyle='--', alpha=0.5, label='ASHRAE 0.85')
+    axes[2].set_ylabel('R²')
+    axes[2].set_title('Coefficient of Determination')
+    axes[2].set_xticks(x)
+    axes[2].set_xticklabels(days)
+    axes[2].legend(loc='lower right')
+    axes[2].set_ylim(0, 1.05)
+    axes[2].grid(True, alpha=0.3, axis='y')
+
+    plt.tight_layout()
+    plt.show()
+else:
+    print("Original parameters not found in grid search results.")
+```
+
+---
+
+## Conclusions
+
+```{python}
+#| label: conclusions
+
+print("=" * 70)
+print("EXTENDED PARAMETRIC CALIBRATION SUMMARY")
+print("=" * 70)
+print()
+print("Grid Search Configuration:")
+print(f"  - Transmittance range: {TAU_VALUES[0]:.2f} - {TAU_VALUES[-1]:.2f} (step 0.02)")
+print(f"  - Floor reflectance range: {RHO_FLOOR_VALUES[0]:.2f} - {RHO_FLOOR_VALUES[-1]:.2f} (step 0.02)")
+print(f"  - Hallway reflectance range: {RHO_HALL_VALUES[0]:.2f} - {RHO_HALL_VALUES[-1]:.2f} (step 0.02)")
+print(f"  - Total combinations evaluated: {len(results_df)}")
+print()
+print("Optimal Parameters Found:")
+print(f"  - Glazing transmittance (τ):   {optimal['tau']:.2f} (measured: 0.88)")
+print(f"  - Floor reflectance (ρ_floor): {optimal['rho_floor']:.2f} (measured: 0.30)")
+print(f"  - Hallway reflectance (ρ_hall): {optimal['rho_hall']:.2f} (measured: 0.36)")
+print()
+print("Performance at Optimal Point:")
+print(f"  - NMBE:      {optimal['nmbe_combined']:+.2f}% (ASHRAE: ±10%)")
+print(f"  - CV(RMSE):  {optimal['cvrmse_combined']:.2f}% (ASHRAE: ≤30%)")
+print(f"  - R²:        {optimal['r2_combined']:.3f} (ASHRAE: >0.85)")
+print(f"  - GOF:       {optimal['gof']:.2f}%")
+print()
+print("ASHRAE Compliance:", "YES" if optimal['meets_ashrae'] else "NO")
+print()
+
+if len(original_result) > 0:
+    orig = original_result.iloc[0]
+    improvement = orig['gof'] - optimal['gof']
+    print("Comparison with Original (Measured) Values:")
+    print(f"  - Original GOF: {orig['gof']:.2f}%")
+    print(f"  - Optimal GOF:  {optimal['gof']:.2f}%")
+    print(f"  - Improvement:  {improvement:.2f} percentage points ({100*improvement/orig['gof']:.1f}% reduction)")
+
+print()
+print("Physical Interpretation:")
+print(f"  - τ = {optimal['tau']:.2f} (vs measured 0.88) accounts for:")
+print("    * Window frame obstruction (~8-10% of glazing area)")
+print("    * Glazing dirt/degradation")
+print("    * Manufacturing variation")
+print(f"  - ρ_floor = {optimal['rho_floor']:.2f} (vs measured 0.30) accounts for:")
+print("    * Desks/furniture covering floor area")
+print("    * Shadowing from furniture")
+print(f"  - ρ_hall = {optimal['rho_hall']:.2f} (vs measured 0.36) accounts for:")
+print("    * Furniture or equipment in hallway")
+print("    * Actual usage conditions")
+print("=" * 70)
+```
+
+---
+
+## Appendix: Results Summary
+
+```{python}
+#| label: results-stats
+
+print("Results Statistics:")
+print(f"  - Minimum GOF: {results_df['gof'].min():.2f}%")
+print(f"  - Maximum GOF: {results_df['gof'].max():.2f}%")
+print(f"  - Median GOF:  {results_df['gof'].median():.2f}%")
+print()
+print(f"  - ASHRAE-compliant solutions: {len(results_df[results_df['meets_ashrae']])} ({100*len(results_df[results_df['meets_ashrae']])/len(results_df):.1f}%)")
+print(f"  - Solutions with R² > 0.85: {len(results_df[results_df['r2_combined'] > 0.85])} ({100*len(results_df[results_df['r2_combined'] > 0.85])/len(results_df):.1f}%)")
+print(f"  - Solutions with |NMBE| ≤ 10%: {len(results_df[abs(results_df['nmbe_combined']) <= 10])} ({100*len(results_df[abs(results_df['nmbe_combined']) <= 10])/len(results_df):.1f}%)")
+print(f"  - Solutions with CV(RMSE) ≤ 30%: {len(results_df[results_df['cvrmse_combined'] <= 30])} ({100*len(results_df[results_df['cvrmse_combined'] <= 30])/len(results_df):.1f}%)")
+```

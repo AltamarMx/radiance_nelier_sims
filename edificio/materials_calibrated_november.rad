@@ -1,0 +1,50 @@
+# Radiance Materials - Edificio Main Room (CALIBRATED FOR NOVEMBER 20)
+# Optimal calibration from extended parametric grid search
+# Optimized specifically for November 20 conditions (lower sun angle)
+#
+# Calibration adjustments:
+#   - Glazing transmittance: 0.88 -> 0.70
+#   - Floor reflectance: 0.30 -> 0.11
+#   - Hallway reflectance: 0.36 -> 0.17
+#
+# November 20 metrics: NMBE = +0.8%, CV(RMSE) = 51.4%, R² = 0.40, GOF = 51.5%
+
+# FLOORS
+void plastic PISO-CONCRETO-PULIDOIER
+0
+0
+5 0.11 0.11 0.11 0.06 0.02
+
+void plastic PISO-PASILLOIER
+0
+0
+5 0.17 0.17 0.17 0 0
+
+# WALLS & STRUCTURE
+void plastic LadrilloIER
+0
+0
+5 0.55 0.55 0.55 0.04 0.03
+
+void plastic Material-de-bloque-de-componente-del-proyecto
+0
+0
+5 0.4 0.4 0.4 0 0
+
+# CEILING
+void plastic CONCRETO-ARMADOIER
+0
+0
+5 0.1 0.1 0.1 0 0
+
+# METAL ELEMENTS
+void metal AluminiumIER
+0
+0
+5 0.68 0.68 0.68 0.9 0.15
+
+# GLAZING (CALIBRATED FOR NOVEMBER)
+void glass Acristalamiento-exterior-del-proyecto
+0
+0
+3 0.70 0.70 0.70

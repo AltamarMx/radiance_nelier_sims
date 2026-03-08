@@ -6,13 +6,13 @@ This document describes the optical properties of materials used in the Radiance
 
 | Material | Radiance Type | Reflectance (ρ) | Transmittance (τ) | Location |
 |----------|---------------|-----------------|-------------------|----------|
-| PISO-CONCRETO-PULIDOIER | plastic | 0.65 | - | Main room floor |
+| PISO-CONCRETO-PULIDOIER | plastic | 0.30 | - | Main room floor |
 | PISO-PASILLOIER | plastic | 0.36 | - | Hallway floor |
 | LadrilloIER | plastic | 0.55 | - | Brick walls |
 | Material-de-bloque-de-componente-del-proyecto | plastic | 0.40 | - | Wall components |
 | CONCRETO-ARMADOIER | plastic | 0.10 | - | Ceiling |
 | AluminiumIER | metal | 0.68 | - | Window frames |
-| Acristalamiento-exterior-del-proyecto | glass | - | 0.978 | Window glazing |
+| Acristalamiento-exterior-del-proyecto | glass | - | 0.88 | Window glazing |
 
 ## Room Layout
 
@@ -53,18 +53,18 @@ This document describes the optical properties of materials used in the Radiance
 void plastic PISO-CONCRETO-PULIDOIER
 0
 0
-5 0.65 0.65 0.65 0.2 0
+5 0.3 0.3 0.3 0.06 0.02
 ```
 
 | Property | Value | Description |
 |----------|-------|-------------|
-| Type | plastic | Lambertian diffuse |
-| RGB Reflectance | (0.65, 0.65, 0.65) | Neutral gray |
-| Specularity | 0.2 | Moderate specular component |
-| Roughness | 0 | Smooth surface |
-| **Total Reflectance** | **65%** | Light gray polished concrete |
+| Type | plastic | Lambertian diffuse with specular |
+| RGB Reflectance | (0.30, 0.30, 0.30) | Neutral gray |
+| Specularity | 0.06 | Subtle specular component |
+| Roughness | 0.02 | Nearly smooth surface |
+| **Total Reflectance** | **30%** | Polished concrete with subtle brightness |
 
-**Daylighting impact:** High reflectance floor contributes significantly to inter-reflections, improving light distribution in the room interior.
+**Daylighting impact:** Polished concrete floor with subtle reflection contributes to inter-reflections.
 
 ---
 
@@ -75,42 +75,42 @@ void plastic PISO-CONCRETO-PULIDOIER
 void plastic PISO-PASILLOIER
 0
 0
-5 0.36 0.36 0.36 0.2 0
+5 0.36 0.36 0.36 0 0
 ```
 
 | Property | Value | Description |
 |----------|-------|-------------|
 | Type | plastic | Lambertian diffuse |
 | RGB Reflectance | (0.36, 0.36, 0.36) | Medium gray |
-| Specularity | 0.2 | Moderate specular component |
-| Roughness | 0 | Smooth surface |
-| **Total Reflectance** | **36%** | Medium gray floor |
+| Specularity | 0 | Purely diffuse (no specular) |
+| Roughness | 0 | N/A (diffuse material) |
+| **Total Reflectance** | **36%** | Rough textured concrete |
 
-**Daylighting impact:** Lower reflectance than main room reduces light contribution from hallway to main room through south windows.
+**Daylighting impact:** Rough concrete with visible texture and marks. Purely diffuse reflection.
 
 ---
 
-### 3. Walls - LadrilloIER (Brick)
+### 3. Walls - LadrilloIER (White Ceramic Brick)
 
 **Radiance definition:**
 ```
 void plastic LadrilloIER
 0
 0
-5 0.55 0.55 0.55 0 0
+5 0.55 0.55 0.55 0.04 0.03
 ```
 
 | Property | Value | Description |
 |----------|-------|-------------|
-| Type | plastic | Lambertian diffuse |
-| RGB Reflectance | (0.55, 0.55, 0.55) | Medium-light gray |
-| Specularity | 0 | Purely diffuse |
-| Roughness | 0 | - |
-| **Total Reflectance** | **55%** | Typical painted brick |
+| Type | plastic | Lambertian diffuse with specular |
+| RGB Reflectance | (0.55, 0.55, 0.55) | Medium-light (measured) |
+| Specularity | 0.04 | Subtle glaze reflection |
+| Roughness | 0.03 | Smooth ceramic surface |
+| **Total Reflectance** | **55%** | White ceramic brick (measured) |
 
-**Daylighting impact:** Moderate wall reflectance provides good inter-reflection without excessive brightness.
+**Daylighting impact:** White ceramic brick with subtle glaze provides moderate inter-reflection with slight specular component.
 
----
+--- 
 
 ### 4. Wall Components - Material-de-bloque-de-componente-del-proyecto
 
@@ -159,14 +159,15 @@ void plastic CONCRETO-ARMADOIER
 void metal AluminiumIER
 0
 0
-5 0.68 0.68 0.68 0 0
+5 0.68 0.68 0.68 0.9 0.15
 ```
 
 | Property | Value | Description |
 |----------|-------|-------------|
 | Type | metal | Specular reflective |
 | RGB Reflectance | (0.68, 0.68, 0.68) | Light metallic |
-| Specularity | 0 | (inherent to metal type) |
+| Specularity | 0.9 | High specular fraction (metallic) |
+| Roughness | 0.15 | Brushed surface texture |
 | **Total Reflectance** | **68%** | Brushed aluminum |
 
 ---
@@ -178,36 +179,36 @@ void metal AluminiumIER
 void glass Acristalamiento-exterior-del-proyecto
 0
 0
-3 0.978371 0.978371 0.978371
+3 0.88 0.88 0.88
 ```
 
 | Property | Value | Description |
 |----------|-------|-------------|
 | Type | glass | Transparent |
-| RGB Transmittance | (0.978, 0.978, 0.978) | Clear glass |
-| **Total Transmittance** | **97.8%** | Very high clarity |
+| RGB Transmittance | (0.88, 0.88, 0.88) | Clear glass |
+| **Total Transmittance** | **88%** | Good light transmission |
 
-**Daylighting impact:** Excellent light transmission allows maximum daylight penetration. This high transmittance value represents idealized clear glass without coatings or tinting.
+**Daylighting impact:** Good light transmission allows significant daylight penetration. This transmittance value is typical for single-pane clear glass.
 
 ---
 
 ## Reflectance Comparison
 
 ```
-Ceiling        ████░░░░░░░░░░░░░░░░  10%  (Dark)
+Ceiling        ██░░░░░░░░░░░░░░░░░░  10%  (Dark)
+Main Floor     ██████░░░░░░░░░░░░░░  30%  (Medium-Dark)
 Hallway Floor  ████████░░░░░░░░░░░░  36%  (Medium)
 Wall Block     ████████░░░░░░░░░░░░  40%  (Medium)
 Brick Walls    ███████████░░░░░░░░░  55%  (Medium-Light)
-Main Floor     █████████████░░░░░░░  65%  (Light)
 Aluminum       ██████████████░░░░░░  68%  (Reflective)
 ```
 
 ## Notes on Daylighting Performance
 
-1. **Floor-Ceiling Contrast**: The large difference between floor reflectance (65%) and ceiling reflectance (10%) creates an asymmetric light distribution pattern, with more light reflected upward from the floor than downward from the ceiling.
+1. **Floor-Ceiling Contrast**: The difference between floor reflectance (30%) and ceiling reflectance (10%) creates an asymmetric light distribution pattern, with more light reflected upward from the floor than downward from the ceiling.
 
 2. **Bilateral Daylighting**: Windows on both North and South walls provide bilateral daylighting, which typically results in more uniform illuminance distribution compared to unilateral designs.
 
-3. **Hallway Contribution**: The darker hallway floor (36% vs 65%) reduces the amount of reflected light entering the main room from the south, potentially creating slight north-south asymmetry in the light distribution.
+3. **Hallway Contribution**: The hallway floor (36%) has slightly higher reflectance than the main room floor (30%), though both are in the medium-dark range.
 
-4. **Glass Transmittance**: The very high glazing transmittance (97.8%) represents idealized conditions. Real-world glazing typically has lower transmittance (70-85%) due to coatings, dirt, and frame obstruction.
+4. **Glass Transmittance**: The glazing transmittance (88%) is typical for single-pane clear glass. This allows good daylight penetration while accounting for real-world glass properties.
