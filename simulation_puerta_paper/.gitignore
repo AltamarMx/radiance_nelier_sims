@@ -1,0 +1,12 @@
+/.quarto/
+**/*.quarto_ipynb
+**/*.quarto_ipynb_*
+
+# Cachés y salidas regenerables de Quarto (no son resultados; se rehacen al renderear)
+/.jupyter_cache/
+/_freeze/
+/_output/
+
+# Tutorial de terceros (LBNL/Subramaniam), descargable de:
+# https://www.radiance-online.org/learning/tutorials/matrix-based-methods
+/radTutorialFiles-master/

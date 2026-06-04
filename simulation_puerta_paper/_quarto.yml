@@ -1,0 +1,25 @@
+project:
+  type: default
+  output-dir: _output
+
+execute:
+  freeze: auto      # Solo recomputa chunks cuyo código cambió
+  cache: true
+  daemon: false
+
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    code-fold: false
+    code-tools: true
+    theme: cosmo
+    fig-width: 10
+    fig-height: 6
+    embed-resources: true
+    df-print: paged
+    lightbox: true   # click en cualquier figura para expandirla
+
+lang: es

@@ -1,0 +1,45 @@
+# Radiance Materials — Óptimo 26 jun
+# Generado por scripts/generate_optimal_materials.py desde optimal_parameters.json
+# τ=0.82, ρ_floor=0.17, ρ_hall=0.17
+# Resto de materiales: igual que materials.rad base (geometría con puerta)
+
+# FLOORS
+void plastic PISO-CONCRETO-PULIDOIER
+0
+0
+5 0.17 0.17 0.17 0.2 0
+
+void plastic PISO-PASILLOIER
+0
+0
+5 0.17 0.17 0.17 0.2 0
+
+# WALLS & STRUCTURE
+void plastic LadrilloIER
+0
+0
+5 0.55 0.55 0.55 0 0
+
+# CEILING
+void plastic CONCRETO-ARMADOIER
+0
+0
+5 0.1 0.1 0.1 0 0
+
+# METAL ELEMENTS
+void metal AluminiumIER
+0
+0
+5 0.68 0.68 0.68 0 0
+
+# DOOR (puerta amarilla) — ρ luminosa = 0.265R+0.670G+0.065B = 0.37
+void metal AluminiumIERamarillo
+0
+0
+5 0.393 0.393 0.039 0 0
+
+# GLAZING
+void glass Acristalamiento-exterior-del-proyecto
+0
+0
+3 0.82 0.82 0.82

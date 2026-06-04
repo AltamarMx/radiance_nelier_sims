@@ -1,0 +1,49 @@
+# Radiance Materials - Edificio Main Room (con puerta)
+#
+# Base: scene.mat + glazing.mat de la nueva exportación de DesignBuilder
+# Correcciones aplicadas:
+#   - Acristalamiento τ = 0.88 (era 0.978 en glazing.mat — ajustado por instrucción)
+#   - AluminiumIERamarillo conservado tal cual (puerta amarilla, ρ=0.68)
+#   - Material-de-bloque-de-componente-del-proyecto eliminado (ya no se referencia)
+
+# FLOORS
+void plastic PISO-CONCRETO-PULIDOIER
+0
+0
+5 0.65 0.65 0.65 0.2 0
+
+void plastic PISO-PASILLOIER
+0
+0
+5 0.36 0.36 0.36 0.2 0
+
+# WALLS & STRUCTURE
+void plastic LadrilloIER
+0
+0
+5 0.55 0.55 0.55 0 0
+
+# CEILING
+void plastic CONCRETO-ARMADOIER
+0
+0
+5 0.1 0.1 0.1 0 0
+
+# METAL ELEMENTS
+void metal AluminiumIER
+0
+0
+5 0.68 0.68 0.68 0 0
+
+# DOOR (puerta amarilla, NUEVO en esta versión con puerta)
+# Amarillo real: R=G altos, B bajo. Reflectancia luminosa ρ = 0.265R+0.670G+0.065B = 0.37
+void metal AluminiumIERamarillo
+0
+0
+5 0.393 0.393 0.039 0 0
+
+# GLAZING (τ corregido a 0.88 por instrucción)
+void glass Acristalamiento-exterior-del-proyecto
+0
+0
+3 0.88 0.88 0.88

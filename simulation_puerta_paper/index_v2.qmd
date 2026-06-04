@@ -1,0 +1,1119 @@
+---
+title: "Validación de simulación Radiance — Salón Temixco"
+subtitle: "Calibración en junio, validación en noviembre y evaluación anual (UDI + confort)"
+author: "IER-UNAM"
+date: today
+---
+
+# Introducción
+
+Este documento valida la simulación de iluminación natural del salón (Radiance,
+**Two-Phase Method**) contra mediciones con luxómetros, siguiendo una metodología
+de **calibración → validación → evaluación anual** en cuatro pasos:
+
+1. **Calibración (junio).** Búsqueda paramétrica sobre las **tres** variables de
+   material — τ (transmitancia del vidrio), ρ_floor (reflectancia del piso del
+   aula) y ρ_hall (reflectancia del piso del pasillo) — comparando contra las
+   mediciones del **26 jun 2024**.
+2. **Selección del mejor conjunto de parámetros** minimizando
+
+   $$\mathrm{GOF} = \sqrt{\mathrm{NMBE}^2 + \mathrm{NMAE}^2}.$$
+
+3. **Validación (noviembre).** Con los parámetros fijados en el paso 2 se
+   compara contra las mediciones del **20 nov 2024** (día independiente, no usado
+   en la calibración). La comparación principal es el **promedio espacial por
+   hora con su desviación estándar**, experimental vs. calibrado.
+4. **Evaluación anual.** Con el modelo ya validado se calcula el **Useful
+   Daylight Illuminance (UDI)** espacial y el **mapa de confort temporal**
+   (hora × mes) sobre todo el año.
+
+## Métricas (definiciones)
+
+Con $E_{i,s}$ = iluminancia simulada y $E_{i,m}$ = medida en el sensor $i$
+(n puntos × horas):
+
+$$
+\mathrm{NMBE} = \frac{\sum_{i=1}^{n}(E_{i,s}-E_{i,m})}{\sum_{i=1}^{n} E_{i,m}},
+\qquad
+\mathrm{NMAE} = \frac{\sum_{i=1}^{n}\lvert E_{i,s}-E_{i,m}\rvert}{\sum_{i=1}^{n} E_{i,m}}.
+$$
+
+$$
+\mathrm{CV(RMSE)} = \frac{\sqrt{\tfrac1n\sum (E_{i,s}-E_{i,m})^2}}{\overline{E_m}},
+\qquad
+R^2 = 1 - \frac{\mathrm{SS_{res}}}{\mathrm{SS_{tot}}},
+\qquad
+\mathrm{GOF} = \sqrt{\mathrm{NMBE}^2 + \mathrm{NMAE}^2}.
+$$
+
+Convención de signo: **NMBE > 0 ⇒ la simulación sobreestima** respecto al
+experimento. Umbrales de referencia (ASHRAE Guideline 14): $|\mathrm{NMBE}|\le 10\%$,
+$\mathrm{CV(RMSE)}\le 30\%$, $R^2 > 0.85$.
+
+## Contexto
+
+| Parámetro | Valor |
+|-----------|-------|
+| Ubicación | Temixco, México (18.85°N, 99.14°W) |
+| Edificio | Aula exportada de DesignBuilder |
+| Dimensiones del salón | 7.66 m × 9.37 m, plano de trabajo a 0.75 m |
+| Mediciones | 26 jun 2024 (calibración) y 20 nov 2024 (validación) |
+| Rejilla de validación | 7 × 9 = 63 puntos, espaciado 1.08 m |
+| Rejilla anual (UDI/confort) | 20 × 24 = 480 puntos |
+| Cielo | Reinhart m=1, 146 patches |
+
+## Flujo de uso (dos pasos)
+
+```bash
+# 1. Pipeline Radiance — lento (~15-20 min, 8 cores). Genera octrees, DC y .ill.
+#    Idempotente: respeta salidas más recientes que sus insumos.
+bash scripts/run_radiance.sh
+
+# 2. Este reporte — rápido (~1 min). Carga los .ill y analiza.
+quarto render index_v2.qmd
+```
+
+La búsqueda paramétrica de calibración (paso 1) vive en
+`scripts/run_parametric_search.py` y deposita su CSV en `data/parametric/`; este
+documento la **lee**, no la ejecuta.
+
+---
+
+# Setup {#sec-setup}
+
+```{python}
+#| label: setup
+#| echo: true
+
+import os
+import sys
+import json
+import shutil
+from pathlib import Path
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import matplotlib.ticker as mticker
+
+# Paths relativos a la raíz del folder (portable)
+ROOT = Path.cwd()
+EDIFICIO = ROOT / "edificio"
+DATA = ROOT / "data"
+EXP_DIR = DATA / "experimental"
+SCRIPTS = ROOT / "scripts"
+ILL_DIR = EDIFICIO / "results" / "dc"
+PARAM_DIR = DATA / "parametric"
+
+sys.path.insert(0, str(SCRIPTS))
+from lib.radiance_io import (
+    parse_annual_ill_file,
+    load_experimental_data,
+    load_radiance_data,
+)
+from lib.metrics import compute_metrics
+
+# Verificar binarios Radiance (solo informativo: este qmd no los ejecuta)
+RADIANCE_BINS = ["oconv", "rfluxmtx", "dctimestep", "rmtxop", "gendaymtx", "epw2wea"]
+missing_bin = [b for b in RADIANCE_BINS if shutil.which(b) is None]
+print("Radiance en PATH:" , "OK" if not missing_bin else f"FALTAN {missing_bin}")
+print(f"ROOT = {ROOT}")
+```
+
+## Parámetros calibrados (resultado del paso 2)
+
+El modelo calibrado proviene de la búsqueda paramétrica en junio (sección de
+calibración). Sus parámetros y artefactos:
+
+| Variante | Archivo materiales | τ | ρ_floor | ρ_hall | .ill (63pt) | .ill (480pt) |
+|----------|--------------------|---|---------|--------|-------------|--------------|
+| Calibrado (óptimo junio) | `materials_jun_optimal.rad` | 0.82 | 0.17 | 0.17 | `annual_jun_optimal.ill` | `annual_jun_optimal_480.ill` |
+
+```{python}
+#| label: define-variant
+#| echo: true
+
+# Variante calibrada que se usa en todo el documento.
+CAL = "jun_optimal"
+CAL_LABEL = "Calibrado (óptimo jun)"
+CAL_TAU, CAL_RF, CAL_RH = 0.82, 0.17, 0.17
+
+ILL_CAL_63 = ILL_DIR / f"annual_{CAL}.ill"          # rejilla de validación 7x9
+ILL_CAL_480 = ILL_DIR / f"annual_{CAL}_480.ill"     # rejilla anual 20x24
+ILL_ORIG_63 = ILL_DIR / "annual_validation.ill"     # modelo sin calibrar (referencia)
+
+for p in (ILL_CAL_63, ILL_CAL_480):
+    print(f"  [{'OK' if p.exists() else 'MISSING'}] {p.relative_to(ROOT)}")
+if not ILL_CAL_63.exists():
+    raise FileNotFoundError(
+        "Falta annual_jun_optimal.ill — corre: bash scripts/run_radiance.sh jun_optimal")
+```
+
+---
+
+# Cadena Radiance (documentación) {#sec-radiance}
+
+> Este documento **no ejecuta** los pasos pesados de Radiance; viven en
+> `scripts/run_radiance.sh` y deben correrse antes. Aquí solo se documentan.
+
+El método **Two-Phase** separa la simulación anual en factores independientes:
+
+1. **Sky matrix** — el cielo de cada hora del año (146 parches Reinhart × 8784 h),
+   vía `gendaymtx -m 1` (salida default `-O0`, radiancia visible — requerida por la
+   conversión fotópica de `rmtxop`; **no** usar `-O1`, que es radiancia solar total).
+2. **DC matrix** — respuesta del salón a la luz de cada parche, vía `rfluxmtx`
+   (`-ab 5 -ad 10000 -lw 0.0001 -n 8 -I+`). Una matriz por escena/material.
+3. **Multiplicación** — `dctimestep` × sky matrix → iluminancia anual; `rmtxop -c
+   47.4 119.9 11.6` convierte RGB irradiancia → lux fotópico.
+
+| # | Paso | Comando | Salida |
+|---|------|---------|--------|
+| 1 | Rejilla 63 pts | `generate_sensor_grid.py` | `points/points_validation.txt` |
+| 2 | Sky matrix | `epw2wea` + `gendaymtx` | `skyVectors/nelier_annual.smx` |
+| 3a | Octree | `oconv mat.rad scene.rad ...` | `octrees/scene_<v>.oct` |
+| 3b | DC matrix (lento) | `rfluxmtx ...` | `matrices/dc/illum_<v>.mtx` |
+| 3c | Iluminancia anual | `dctimestep \| rmtxop` | `results/dc/annual_<v>.ill` |
+
+---
+
+# Rejilla de sensores {#sec-rejilla}
+
+La rejilla 7 × 9 = 63 puntos coincide con las posiciones físicas de los
+luxómetros (espaciado 1.08 m, plano de trabajo 0.75 m).
+
+```{python}
+#| label: fig-sensor-grid
+#| fig-cap: "Layout del salón y posiciones de los 63 sensores de validación."
+#| echo: false
+
+sensors = np.loadtxt(EDIFICIO / "points" / "points_validation.txt")
+sx, sy = sensors[:, 0], sensors[:, 1]
+room_min_x, room_max_x = 0.4586, 8.3186
+room_min_y, room_max_y = -9.6533, -0.0833
+
+fig, ax = plt.subplots(figsize=(8, 9))
+ax.add_patch(plt.Rectangle((room_min_x, room_min_y),
+                           room_max_x - room_min_x, room_max_y - room_min_y,
+                           fill=False, edgecolor='black', linewidth=2))
+ax.scatter(sx, sy, c='tab:blue', s=30, zorder=3)
+ax.text((room_min_x + room_max_x) / 2, room_max_y + 0.3, 'Pared NORTE (ventanas)',
+        ha='center', va='bottom', fontsize=10, fontweight='bold')
+ax.text((room_min_x + room_max_x) / 2, room_min_y - 0.3, 'Pared SUR (ventanas)',
+        ha='center', va='top', fontsize=10, fontweight='bold')
+ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]")
+ax.set_aspect('equal')
+ax.set_title(f"Rejilla de validación: 7 × 9 = {len(sensors)} puntos a 0.75 m")
+ax.grid(alpha=0.3)
+plt.tight_layout(); plt.show()
+```
+
+---
+
+# Cargar datos {#sec-load}
+
+```{python}
+#| label: load-data
+#| echo: true
+
+# Horas medidas comunes a junio y noviembre
+hours = [9, 10, 11, 12, 13, 14, 15, 16, 17]
+
+# Experimentales (klux -> lux, sin I5N, filas invertidas en horas impares)
+exp_jun = load_experimental_data(EXP_DIR / "005_26Junio", hours)
+exp_nov = load_experimental_data(EXP_DIR / "006_20Nov", hours)
+
+# Simulado calibrado (mismo .ill 63pt para ambos días, extrayendo cada fecha)
+sim_jun = load_radiance_data(ILL_CAL_63, 6, 26, hours)
+sim_nov = load_radiance_data(ILL_CAL_63, 11, 20, hours)
+
+# Modelo original (sin calibrar), para referencia
+sim_jun_orig = load_radiance_data(ILL_ORIG_63, 6, 26, hours) if ILL_ORIG_63.exists() else None
+sim_nov_orig = load_radiance_data(ILL_ORIG_63, 11, 20, hours) if ILL_ORIG_63.exists() else None
+
+print(f"Horas: {hours}")
+print(f"Grid: 7 × 9 = 63 puntos por hora")
+```
+
+---
+
+# Paso 1–2 · Calibración en junio (búsqueda paramétrica) {#sec-calibracion}
+
+Se barre el espacio (τ, ρ_floor, ρ_hall) y se evalúa **GOF en junio** para cada
+combinación. El óptimo es el de menor `GOF_jun`.
+
+```bash
+# Grid completo (8 × 7 × 6 = 336 combinaciones, ~8 h con 8 cores)
+uv run python scripts/run_parametric_search.py
+# Grid reducido para pruebas / continuar una corrida interrumpida
+uv run python scripts/run_parametric_search.py --quick
+uv run python scripts/run_parametric_search.py --resume
+```
+
+```{python}
+#| label: param-load
+#| echo: true
+
+PARAM_CSV = PARAM_DIR / "grid_results.csv"
+param_df = None
+if PARAM_CSV.exists():
+    param_df = pd.read_csv(PARAM_CSV)
+    param_df = param_df[param_df.get('success', True) == True].copy()
+    # El CSV se generó con la convención de signo previa (residual = exp - sim).
+    # Alineamos NMBE a la convención del paper (sim - exp): NMBE_new = -NMBE_old.
+    for c in ('nmbe_jun', 'nmbe_nov'):
+        if c in param_df.columns:
+            param_df[c] = -param_df[c]
+    print(f"Cargadas {len(param_df)} combinaciones.")
+    print(f"  τ ∈ {sorted(param_df.tau.unique())}")
+    print(f"  ρ_floor ∈ {sorted(param_df.rho_floor.unique())}")
+    print(f"  ρ_hall ∈ {sorted(param_df.rho_hall.unique())}")
+else:
+    print(f"No existe {PARAM_CSV.relative_to(ROOT)} — corre run_parametric_search.py")
+```
+
+## Selección del óptimo (mínimo GOF en junio)
+
+```{python}
+#| label: param-select
+#| echo: true
+
+if param_df is not None and len(param_df):
+    best = param_df.loc[param_df['gof_jun'].idxmin()]
+    print("Mejor combinación por GOF_jun = √(NMBE² + NMAE²):")
+    print(f"  τ        = {best['tau']:.2f}")
+    print(f"  ρ_floor  = {best['rho_floor']:.2f}")
+    print(f"  ρ_hall   = {best['rho_hall']:.2f}")
+    print(f"  NMBE_jun = {best['nmbe_jun']:+.2f} %   (sim - exp)")
+    print(f"  NMAE_jun = {best['nmae_jun']:.2f} %")
+    print(f"  CV(RMSE)_jun = {best['cvrmse_jun']:.2f} %")
+    print(f"  R²_jun   = {best['r2_jun']:.3f}")
+    print(f"  GOF_jun  = {best['gof_jun']:.2f} %")
+    print()
+    print(f"Esta combinación es la materializada en materials_{CAL}.rad")
+    print(f"(τ={CAL_TAU}, ρ_floor={CAL_RF}, ρ_hall={CAL_RH}) y usada en el resto del documento.")
+```
+
+## Top 10 combinaciones (por GOF en junio)
+
+```{python}
+#| label: param-top10
+#| echo: false
+
+if param_df is not None and len(param_df):
+    cols = ['tau', 'rho_floor', 'rho_hall',
+            'nmbe_jun', 'cvrmse_jun', 'nmae_jun', 'r2_jun', 'gof_jun']
+    cols = [c for c in cols if c in param_df.columns]
+    top10 = param_df.nsmallest(10, 'gof_jun')[cols].round(2)
+    display(top10.reset_index(drop=True))
+```
+
+## Heatmap de GOF_jun en (τ, ρ_floor)
+
+```{python}
+#| label: fig-param-heatmap
+#| fig-cap: "GOF en junio sobre (τ, ρ_floor), fijando ρ_hall en el valor del óptimo. La estrella marca el mínimo."
+#| echo: false
+
+if param_df is not None and len(param_df):
+    rho_hall_fix = float(best['rho_hall'])
+    sl = param_df[np.isclose(param_df['rho_hall'], rho_hall_fix, atol=1e-3)]
+    pivot = sl.pivot_table(index='rho_floor', columns='tau', values='gof_jun')
+    fig, ax = plt.subplots(figsize=(9, 6))
+    im = ax.imshow(pivot.values, aspect='auto', origin='lower', cmap='viridis_r',
+                   extent=[pivot.columns.min(), pivot.columns.max(),
+                           pivot.index.min(), pivot.index.max()])
+    min_idx = np.unravel_index(pivot.values.argmin(), pivot.shape)
+    ax.scatter(pivot.columns[min_idx[1]], pivot.index[min_idx[0]], marker='*',
+               s=300, c='red', edgecolors='white', linewidths=1.5,
+               label=f'min = {pivot.values.min():.2f} %')
+    ax.set_xlabel('τ (transmitancia vidrio)')
+    ax.set_ylabel('ρ_floor (piso aula)')
+    ax.set_title(f'GOF_jun [%]  (ρ_hall = {rho_hall_fix:.2f})')
+    ax.legend(loc='upper right')
+    fig.colorbar(im, ax=ax, label='GOF_jun [%]')
+    plt.tight_layout(); plt.show()
+```
+
+## Sensibilidad de GOF_jun a cada parámetro
+
+```{python}
+#| label: fig-param-sensitivity
+#| fig-cap: "Para cada valor de un parámetro, GOF_jun mínimo alcanzable variando los otros dos."
+#| echo: false
+
+if param_df is not None and len(param_df) >= 9:
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    for ax, p, label in [
+        (axes[0], 'tau', 'τ (vidrio)'),
+        (axes[1], 'rho_floor', 'ρ_floor (aula)'),
+        (axes[2], 'rho_hall', 'ρ_hall (pasillo)'),
+    ]:
+        sens = param_df.groupby(p)['gof_jun'].min()
+        ax.plot(sens.index, sens.values, 'o-', color='tab:blue')
+        ax.axvline(float(best[p]), color='red', ls='--', lw=1, label='óptimo')
+        ax.set_xlabel(label); ax.set_ylabel('GOF_jun mín [%]')
+        ax.grid(alpha=0.3); ax.legend(fontsize=8)
+    fig.suptitle('Sensibilidad de GOF_jun (mejor caso variando los otros dos)',
+                 fontsize=12, fontweight='bold')
+    plt.tight_layout(); plt.show()
+```
+
+## Ajuste en junio: experimental vs calibrado
+
+```{python}
+#| label: contour-helper
+#| echo: false
+
+distancia_muro_norte = 0.51
+distancia_entre_sensores = 1.08
+distancia_pizarron = 0.71
+x_pos = [distancia_muro_norte + i * distancia_entre_sensores for i in range(9)]
+y_pos = [distancia_pizarron + i * distancia_entre_sensores for i in range(7)]
+NIVELES = [0, 300, 500, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 10000]
+# Subconjunto de niveles que se rotulan (contornos y colorbar comparten estos).
+LABEL_LEVELS = [500, 1500, 3000, 5000, 7000, 10000]
+Xg, Yg = np.meshgrid(x_pos, y_pos)
+hour_labels = [f"{h}:00" for h in hours]
+
+# Carpeta de figuras listas para el artículo (PNG 300 dpi).
+IMG_PAPER = ROOT / "img_paper"
+IMG_PAPER.mkdir(exist_ok=True)
+
+
+def plot_contour_pair(exp_list, rad_list, title, savename=None):
+    """Experimental (filas pares) vs simulado (filas impares), grid 6×3.
+
+    Dimensionado para una figura de página completa (ancho de revista ≈180 mm).
+    Tamaños de fuente en puntos pensados para ese ancho final (no reescalar).
+    Si `savename` se da, además guarda la figura en img_paper/<savename> (300 dpi).
+    """
+    from matplotlib.ticker import FuncFormatter, FormatStrFormatter
+    fig, axes = plt.subplots(6, 3, figsize=(6.0, 8.6), sharex=True, sharey=True)
+    cf = None
+    for i, hora in enumerate(hour_labels):
+        row_e, row_r, col = (i // 3) * 2, (i // 3) * 2 + 1, i % 3
+        Z_e = exp_list[i].values.astype(float)
+        Z_r = rad_list[i].values.astype(float)
+        for ax_, Z in [(axes[row_e, col], Z_e), (axes[row_r, col], Z_r)]:
+            cf = ax_.contourf(Xg, Yg, Z, cmap='jet', alpha=0.7, levels=NIVELES)
+            c = ax_.contour(Xg, Yg, Z, colors='black', linewidths=0.4, levels=NIVELES)
+            ax_.clabel(c, LABEL_LEVELS, inline=True, fontsize=5, fmt=lambda v: f"{int(v):,}")
+            ax_.set_xticks([2, 4, 6, 8]); ax_.set_yticks([2, 4, 6])
+            ax_.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+            ax_.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+            ax_.tick_params(labelsize=6)
+            ax_.set_aspect('equal')  # X e Y en metros → escala isotrópica
+        axes[row_e, col].set_title(hora, fontsize=8)
+        if col == 0:
+            axes[row_e, col].set_ylabel('Exp\nX [m]', fontsize=8)
+            axes[row_r, col].set_ylabel('Sim\nX [m]', fontsize=8)
+    axes[0, 0].invert_yaxis()
+    for col in range(3):
+        axes[5, col].set_xlabel('Y [m]', fontsize=8)
+    # Colorbar horizontal abajo: los paneles aprovechan todo el ancho de página.
+    plt.tight_layout(rect=[0, 0.09, 1, 0.99])
+    cbar_ax = fig.add_axes([0.20, 0.06, 0.6, 0.012])
+    cb = fig.colorbar(cf, cax=cbar_ax, orientation='horizontal', ticks=LABEL_LEVELS)
+    cb.set_label('Illuminance [lux]', fontsize=8)
+    cb.ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{int(v):,}"))
+    cb.ax.tick_params(labelsize=6)
+    if savename:
+        fig.savefig(IMG_PAPER / savename, dpi=300, bbox_inches='tight')
+    plt.show()
+
+
+def plot_hourly_meanstd(exp_list, sim_list, day_label=None, savename=None):
+    """Spatial mean ± 1σ per hour for one day: measured (Exp) vs calibrated (Sim).
+
+    Figura corta (ancho de texto) para el artículo; sin título (va en el caption).
+    """
+    def mean_std(dfs):
+        m = np.array([d.values.mean() for d in dfs])
+        s = np.array([d.values.std() for d in dfs])
+        return m, s
+    fig, ax = plt.subplots(figsize=(7, 3.2))
+    e_m, e_s = mean_std(exp_list)
+    s_m, s_s = mean_std(sim_list)
+    ax.plot(hours, e_m, 'ko-', lw=2, ms=6, label='Exp')
+    ax.fill_between(hours, e_m - e_s, e_m + e_s, color='gray', alpha=0.25)
+    ax.plot(hours, s_m, 's--', color='tab:blue', lw=2, ms=6, label='Sim')
+    ax.fill_between(hours, s_m - s_s, s_m + s_s, color='tab:blue', alpha=0.20)
+    ax.set_xlabel('Hour')
+    ax.set_ylabel(r'$E_\mathrm{avg} \pm \sigma$ [lux]')
+    ax.set_xticks(hours); ax.grid(alpha=0.3); ax.legend()
+    ax.set_ylim(0, 5000); ax.set_yticks(range(0, 5001, 1000))
+    from matplotlib.ticker import FuncFormatter
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{int(v):,}"))
+    plt.tight_layout()
+    if savename:
+        fig.savefig(IMG_PAPER / savename, dpi=300, bbox_inches='tight')
+    plt.show()
+```
+
+```{python}
+#| label: fig-contour-jun
+#| fig-cap: "26 jun 2024 (calibración) — Experimental (filas pares) vs Calibrado (filas impares)."
+#| echo: false
+#| fig-pos: 'p'
+
+plot_contour_pair(exp_jun, sim_jun, '26 jun 2024 — Experimental vs Calibrado (calibración)',
+                  savename='illuminance_map_june26.png')
+```
+
+### Promedio espacial por hora con desviación estándar — junio
+
+Media de los 63 sensores por hora con banda de ±1σ espacial; sirve para ver si la
+tendencia diurna global se reproduce en el día de calibración.
+
+```{python}
+#| label: fig-hourly-meanstd-jun
+#| fig-cap: "26 jun 2024 (calibración) — promedio espacial ± σ por hora, experimental vs calibrado."
+#| echo: false
+
+plot_hourly_meanstd(exp_jun, sim_jun, savename='hourly_mean_june26.png')
+```
+
+#### Alternativa: half-violin plot — junio
+
+Misma información que la figura anterior, pero mostrando la **distribución espacial
+completa** de los 63 sensores en cada hora en lugar de resumirla con ±1σ. En cada
+hora: **mitad izquierda = Experimental** (gris), **mitad derecha = Calibrado** (azul).
+La línea horizontal interna marca la **mediana** espacial. Útil para ver asimetrías y
+colas (p.ej. pocos sensores muy iluminados cerca de la ventana) que una banda
+simétrica ±σ no captura.
+
+```{python}
+#| label: fig-hourly-halfviolin-jun
+#| fig-cap: "26 jun 2024 (calibración) — distribución espacial por hora (half-violin): Exp (izq, gris) vs Calibrado (der, azul). Línea = mediana espacial."
+#| echo: false
+
+def plot_hourly_halfviolin(exp_list, sim_list, savename=None, ymax=5000):
+    """Half-violin por hora: distribución espacial de los 63 sensores.
+
+    Exp en la mitad izquierda (gris), Sim en la derecha (azul). La línea interna
+    es la mediana espacial; encima va la línea conectada de la media por hora
+    (mismo estilo que la figura de ±σ, para comparabilidad).
+    """
+    def values_per_hour(dfs):
+        return [d.values.ravel() for d in dfs]   # 1 vector de sensores por hora
+
+    def half(ax, data, side, color):
+        parts = ax.violinplot(data, positions=hours, widths=0.85,
+                              showextrema=False)
+        for i, b in enumerate(parts['bodies']):
+            v = b.get_paths()[0].vertices
+            c = hours[i]                          # centro = la hora
+            if side == 'left':
+                v[:, 0] = np.minimum(v[:, 0], c)
+            else:
+                v[:, 0] = np.maximum(v[:, 0], c)
+            b.set_facecolor(color); b.set_edgecolor(color)
+            b.set_alpha(0.35); b.set_linewidth(0.8)
+        # mediana (línea corta) por hora, del lado correspondiente
+        meds = [np.median(d) for d in data]
+        for c, md in zip(hours, meds):
+            x0, x1 = (c - 0.32, c) if side == 'left' else (c, c + 0.32)
+            ax.plot([x0, x1], [md, md], color=color, lw=1.2, alpha=0.7)
+
+    e = values_per_hour(exp_list)
+    s = values_per_hour(sim_list)
+    fig, ax = plt.subplots(figsize=(7, 3.2))
+    half(ax, e, 'left', 'gray')
+    half(ax, s, 'right', 'tab:blue')
+    # Líneas conectadas de la media por hora, encima de los violines
+    # (mismo estilo que la figura de promedio ± σ).
+    e_m = np.array([np.mean(d) for d in e])
+    s_m = np.array([np.mean(d) for d in s])
+    ax.plot(hours, e_m, 'ko-', lw=2, ms=6, label='Exp', zorder=5)
+    ax.plot(hours, s_m, 's--', color='tab:blue', lw=2, ms=6, label='Sim', zorder=5)
+    ax.legend(loc='upper right')
+    ax.set_xlabel('Hour')
+    ax.set_ylabel(r'$E$ [lux] (spatial dist.)')
+    ax.set_xticks(hours); ax.grid(alpha=0.3, axis='y')
+    ax.set_ylim(0, ymax); ax.set_yticks(range(0, ymax + 1, 1000))
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{int(v):,}"))
+    plt.tight_layout()
+    if savename:
+        fig.savefig(IMG_PAPER / savename, dpi=300, bbox_inches='tight')
+    plt.show()
+
+plot_hourly_halfviolin(exp_jun, sim_jun, savename='hourly_halfviolin_june26.png')
+```
+
+---
+
+# Paso 3 · Validación en noviembre {#sec-validacion}
+
+Con los parámetros fijados en junio (sin re-ajustar), se compara contra el día
+independiente **20 nov 2024**.
+
+## Métricas — junio (calibración) vs noviembre (validación)
+
+```{python}
+#| label: metrics-table
+#| echo: false
+
+def metrics_row(label, exp_list, sim_list):
+    m = compute_metrics(exp_list, sim_list)
+    return {
+        'Caso': label,
+        'NMBE [%]': round(m['nmbe'], 2),
+        'NMAE [%]': round(m['nmae'], 2),
+        'CV(RMSE) [%]': round(m['cvrmse'], 2),
+        'R²': round(m['r2'], 3),
+        'GOF [%]': round(m['gof'], 2),
+    }
+
+rows = [
+    metrics_row('26 jun — Calibrado (calibración)', exp_jun, sim_jun),
+    metrics_row('20 nov — Calibrado (validación)', exp_nov, sim_nov),
+]
+if sim_jun_orig is not None:
+    rows.insert(0, metrics_row('26 jun — Original (sin calibrar)', exp_jun, sim_jun_orig))
+    rows.append(metrics_row('20 nov — Original (sin calibrar)', exp_nov, sim_nov_orig))
+
+df_metrics = pd.DataFrame(rows)
+m_val = compute_metrics(exp_nov, sim_nov)
+display(df_metrics)
+```
+
+```{python}
+#| label: validation-verdict
+#| echo: false
+#| output: asis
+
+checks = [
+    ("|NMBE| ≤ 10 %", abs(m_val['nmbe']) <= 10, f"{m_val['nmbe']:+.2f} %"),
+    ("CV(RMSE) ≤ 30 %", m_val['cvrmse'] <= 30, f"{m_val['cvrmse']:.2f} %"),
+    ("R² > 0.85", m_val['r2'] > 0.85, f"{m_val['r2']:.3f}"),
+]
+print("**Validación en noviembre vs umbrales ASHRAE G14:**\n")
+for name, ok, val in checks:
+    print(f"- {'✅' if ok else '⚠️'} {name} → {val}")
+```
+
+## Mapas de contorno — noviembre
+
+```{python}
+#| label: fig-contour-nov
+#| fig-cap: "20 nov 2024 (validación) — Experimental (filas pares) vs Calibrado (filas impares)."
+#| echo: false
+#| fig-pos: 'p'
+
+plot_contour_pair(exp_nov, sim_nov, '20 nov 2024 — Experimental vs Calibrado (validación)',
+                  savename='illuminance_map_nov20.png')
+```
+
+### Promedio espacial por hora con desviación estándar — noviembre
+
+Media de los 63 sensores por hora con banda de ±1σ espacial; prueba de que la
+tendencia diurna global se mantiene en el día de validación (independiente).
+
+```{python}
+#| label: fig-hourly-meanstd-nov
+#| fig-cap: "20 nov 2024 (validación) — promedio espacial ± σ por hora, experimental vs calibrado."
+#| echo: false
+
+plot_hourly_meanstd(exp_nov, sim_nov, savename='hourly_mean_nov20.png')
+```
+
+## Scatter experimental vs calibrado
+
+```{python}
+#| label: fig-scatter
+#| fig-cap: "Dispersión punto a punto (cada punto = un sensor en una hora). Línea 1:1 = igualdad."
+#| echo: false
+
+fig, axes = plt.subplots(1, 2, figsize=(15, 7))
+max_val = 12000
+for ax, exp_list, sim_list, day, role in [
+    (axes[0], exp_jun, sim_jun, '26 jun 2024', 'Calibración'),
+    (axes[1], exp_nov, sim_nov, '20 nov 2024', 'Validación'),
+]:
+    all_e = np.concatenate([df.values.flatten() for df in exp_list])
+    all_s = np.concatenate([df.values.flatten() for df in sim_list])
+    m = compute_metrics(exp_list, sim_list)
+    ax.scatter(all_e, all_s, s=6, alpha=0.3, c='steelblue')
+    ax.plot([0, max_val], [0, max_val], 'k--', lw=1, label='1:1')
+    ax.set_xlabel('Experimental [lux]'); ax.set_ylabel('Calibrado [lux]')
+    ax.set_title(f"{day} ({role})\n"
+                 f"NMBE={m['nmbe']:+.1f}%  NMAE={m['nmae']:.1f}%  "
+                 f"R²={m['r2']:.3f}  GOF={m['gof']:.1f}%")
+    ax.set_xlim(0, max_val); ax.set_ylim(0, max_val); ax.set_aspect('equal')
+    ax.legend(); ax.grid(alpha=0.3)
+plt.tight_layout(); plt.show()
+```
+
+---
+
+# Paso 4 · Evaluación anual {#sec-anual}
+
+Con el modelo validado se evalúa todo el año sobre la rejilla densa (480 puntos):
+**UDI** espacial y **mapa de confort temporal**.
+
+```{python}
+#| label: annual-setup
+#| echo: false
+
+if not ILL_CAL_480.exists():
+    raise FileNotFoundError(
+        "Falta annual_jun_optimal_480.ill — corre el pipeline con la rejilla de 480 puntos.")
+
+month_labels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
+                'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+```
+
+## Useful Daylight Illuminance (UDI) — distribución espacial {#sec-udi}
+
+Porcentaje del tiempo (08:00–18:00) en que cada punto cae en cada bin:
+
+- **UDI_under** (< 300 lux): luz insuficiente
+- **UDI_useful** (300–2000 lux): rango útil para tareas visuales
+- **UDI_over** (> 2000 lux): exceso, riesgo de deslumbramiento
+
+```{python}
+#| label: fig-udi
+#| fig-cap: "UDI espacial: % de horas ocupadas (7–18) en cada bin, modelo calibrado."
+#| echo: false
+
+def compute_udi(ill_file, nx=20, ny=24, hour_min=8, hour_max=18):
+    # Horario ocupado [hour_min, hour_max): 08:00–18:00 = 10 h/día.
+    data = parse_annual_ill_file(ill_file)
+    n_hours = data.shape[0]
+    occ = np.array([hour_min <= (h % 24) < hour_max for h in range(n_hours)])
+    occ_data = data[occ, :]
+    return {
+        'under':  ((occ_data < 300).mean(axis=0) * 100).reshape(nx, ny),
+        'useful': (((occ_data >= 300) & (occ_data <= 2000)).mean(axis=0) * 100).reshape(nx, ny),
+        'over':   ((occ_data > 2000).mean(axis=0) * 100).reshape(nx, ny),
+        'n_occupied': int(occ.sum()),
+    }
+
+sensors_480 = np.loadtxt(EDIFICIO / "points" / "points_480.txt")
+xs_480 = np.unique(np.round(sensors_480[:, 0], 3))
+ys_480 = np.unique(np.round(sensors_480[:, 1], 3))
+Y_480_h, X_480_v = np.meshgrid(-ys_480, xs_480)  # Y negado: norte ← sur →
+
+udi = compute_udi(ILL_CAL_480)
+
+from matplotlib.ticker import FormatStrFormatter
+B = list(range(0, 101, 10))   # niveles de % (0–100, paso 10)
+LB = [20, 40, 60, 80]         # niveles rotulados en los contornos
+bins = [
+    (r'UDI$_{under}$ (< 300 lx)',     udi['under']),
+    (r'UDI$_{useful}$ (300–2000 lx)', udi['useful']),
+    (r'UDI$_{over}$ (> 2000 lx)',     udi['over']),
+]
+
+# Mismo estilo que los mapas de iluminancia: colormap jet, ejes en metros a 1
+# decimal, colorbar horizontal abajo, mismas fuentes.
+fig, axes = plt.subplots(1, 3, figsize=(7.0, 2.9), sharey=True)
+cf = None
+for ax, (title, grid) in zip(axes, bins):
+    cf = ax.contourf(Y_480_h, X_480_v, grid, levels=B, cmap='jet')
+    cs = ax.contour(Y_480_h, X_480_v, grid, levels=B, colors='black', linewidths=0.4)
+    ax.clabel(cs, LB, inline=True, fontsize=5, fmt=lambda v: f"{int(v)}")
+    ax.set_xlabel('Y [m]', fontsize=8)
+    ax.set_title(title, fontsize=8)
+    ax.set_aspect('equal')
+    ax.tick_params(labelsize=6)
+    ax.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+    ax.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+axes[0].set_ylabel('X [m]', fontsize=8)
+plt.tight_layout(rect=[0, 0.13, 1, 1])
+cbar_ax = fig.add_axes([0.25, 0.06, 0.5, 0.025])
+cb = fig.colorbar(cf, cax=cbar_ax, orientation='horizontal', ticks=range(0, 101, 20))
+cb.set_label('% of time (08:00–18:00)', fontsize=8)
+cb.ax.tick_params(labelsize=6)
+fig.savefig(IMG_PAPER / 'udi_spatial_calibrated.png', dpi=300, bbox_inches='tight')
+plt.show()
+```
+
+## Penetración de luz por estación {#sec-penetracion}
+
+A diferencia del UDI (que binariza), aquí se ve la **magnitud** de iluminancia y
+su gradiente con la profundidad (ventana→ventana, perfil en U). Cada panel es una
+estación; a cada profundidad se dibuja **medio violín** (KDE) con la forma de la
+distribución de todas las horas ocupadas (08:00–18:00) × 20 sensores. Eje Y
+**semilog** (distribución muy sesgada): el KDE se calcula en espacio log y la
+línea es la **mediana** por profundidad.
+
+**Orientación** (consistente con los heatmaps): **x = 0 es la ventana norte
+(izquierda)** y la profundidad crece hacia la **puerta/sur (derecha)**.
+
+```{python}
+#| label: fig-penetration
+#| fig-cap: "Penetración de luz por estación: raincloud en escala semilog; KDE en espacio log y mediana por profundidad. Modelo calibrado."
+#| echo: false
+
+pts_480 = np.loadtxt(EDIFICIO / "points" / "points_480.txt")
+Y_coord = np.round(pts_480[:, 1], 3)
+# 0 en la ventana norte (izquierda) y crece hacia la puerta/sur (derecha),
+# consistente con los heatmaps (puerta/sur a la derecha).
+depth = Y_coord.max() - Y_coord
+
+data_p = parse_annual_ill_file(ILL_CAL_480)
+n_p = data_p.shape[0]
+year_p = 2024 if n_p >= 8784 else 2023
+hour_p = np.array([h % 24 for h in range(n_p)])
+day_p = np.array([h // 24 for h in range(n_p)])
+occ_p = (hour_p >= 8) & (hour_p < 18)
+
+bd = {s: (datetime(year_p, mm, dd) - datetime(year_p, 1, 1)).days
+      for s, (mm, dd) in [('spring', (3, 20)), ('summer', (6, 20)),
+                          ('autumn', (9, 22)), ('winter', (12, 21))]}
+season_masks = {
+    'Winter': (day_p < bd['spring']) | (day_p >= bd['winter']),
+    'Spring': (day_p >= bd['spring']) & (day_p < bd['summer']),
+    'Summer': (day_p >= bd['summer']) & (day_p < bd['autumn']),
+    'Autumn': (day_p >= bd['autumn']) & (day_p < bd['winter']),
+}
+season_col = {'Winter': 'tab:blue', 'Spring': 'tab:green',
+              'Summer': 'tab:red', 'Autumn': 'tab:orange'}
+
+depths = np.unique(depth)
+
+LO, HI = 50, 10000                                            # rango del eje log [lux]
+# Minor ticks logarítmicos (2..9 por década) en el eje log10 sobre eje lineal.
+yminor = [np.log10(k * 10.0**d) for d in range(1, 5) for k in range(2, 10)]
+# 4 renglones (uno por estación), paneles bajos y anchos.
+fig, axes = plt.subplots(4, 1, figsize=(7.0, 7.2), sharex=True, sharey=True)
+for ax, s in zip(axes, season_masks):
+    sub = data_p[occ_p & season_masks[s], :]
+    dataset = [np.clip(sub[:, depth == dv].ravel(), LO, None) for dv in depths]
+    dlog = [np.log10(d) for d in dataset]                     # KDE en espacio log
+    parts = ax.violinplot(dlog, positions=depths, widths=0.55, showextrema=False)
+    for i, b in enumerate(parts['bodies']):
+        v = b.get_paths()[0].vertices
+        v[:, 0] = np.clip(v[:, 0], depths[i], None)
+        b.set_facecolor(season_col[s]); b.set_alpha(0.45); b.set_edgecolor('none')
+    med = np.array([np.median(d) for d in dataset])           # mediana (robusta en log)
+    ax.plot(depths, np.log10(med), '-', color=season_col[s], lw=1.2)
+    ax.set_title(s, fontsize=8)
+    ax.set_ylim(np.log10(LO), np.log10(HI))
+    ax.set_yticks([2, 3, 4]); ax.set_yticklabels(['100', '1000', '10000'])
+    ax.set_yticks(yminor, minor=True)
+    ax.set_ylabel('E [lux]', fontsize=8)
+    ax.tick_params(labelsize=6); ax.tick_params(which='minor', length=2)
+    ax.grid(False)
+axes[-1].set_xlabel('North (window) ←   Distance from window wall [m]   → South (door)',
+                    fontsize=8)
+plt.tight_layout()
+fig.savefig(IMG_PAPER / 'penetration_seasonal_calibrated.png', dpi=300, bbox_inches='tight')
+plt.show()
+```
+
+### Versión band plot (percentiles) {#sec-penetracion-band}
+
+Alternativa más limpia: en vez de la distribución completa por violín, se resume
+con **mediana + bandas de percentiles** vs profundidad. La banda oscura es el
+**rango intercuartílico (p25–p75)** y la clara el **p5–p95**, en eje Y lineal. Se lee
+de inmediato el perfil de penetración y su dispersión, sin el desorden de puntos.
+**Orientación** (como los heatmaps): ventana **norte en x=0 (izquierda)**, **puerta/sur a la derecha**.
+
+```{python}
+#| label: fig-penetration-band
+#| fig-cap: "Penetración de luz por estación (band plot): mediana + p25–p75 + p5–p95 vs profundidad, eje Y lineal. Modelo calibrado."
+#| echo: false
+
+# Reutiliza depth, data_p, occ_p, season_masks, season_col y depths del chunk anterior.
+fig, axes = plt.subplots(2, 2, figsize=(7.2, 5.2), sharex=True, sharey=True)
+for ax, s in zip(axes.flat, season_masks):
+    sub = data_p[occ_p & season_masks[s], :]                  # (horas_estación, 480)
+    P = lambda q: np.array([np.percentile(sub[:, depth == dv], q) for dv in depths])
+    p05, p25, p50, p75, p95 = P(5), P(25), P(50), P(75), P(95)
+    ax.fill_between(depths, p05, p95, color=season_col[s], alpha=0.18, lw=0)
+    ax.fill_between(depths, p25, p75, color=season_col[s], alpha=0.38, lw=0)
+    # Marcadores en cada profundidad = cada fila transversal promediada (~0.4 m).
+    ax.plot(depths, p50, 'o-', color=season_col[s], lw=1.2, ms=2.5,
+            mfc='white', mec=season_col[s], mew=0.6)
+    ax.set_ylim(0, 7000)
+    ax.set_title(s, fontsize=8)
+    ax.tick_params(labelsize=6); ax.grid(False)
+for ax in axes[:, 0]:
+    ax.set_ylabel('E [lux]', fontsize=8)
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f'{v:,.0f}'))
+for ax in axes[-1, :]:
+    ax.set_xlabel('$D_N$ [m]', fontsize=8)
+plt.tight_layout()
+fig.savefig(IMG_PAPER / 'penetration_seasonal_band.png', dpi=300, bbox_inches='tight')
+plt.show()
+```
+
+## Mapa de confort temporal {#sec-confort}
+
+Para cada hora del día y mes del año: % de la superficie del salón (480 puntos)
+dentro del rango de confort (300–2000 lux).
+
+```{python}
+#| label: fig-confort
+#| fig-cap: "Confort lumínico temporal: % de área en 300–2000 lux por (hora, mes), modelo calibrado."
+#| echo: false
+
+def compute_temporal_comfort(ill_file, lux_min=300, lux_max=2000, hour_min=8, hour_max=18):
+    # Filas = horas 08:00–18:00 (inclusive).
+    data = parse_annual_ill_file(ill_file)
+    n_hours = data.shape[0]
+    year = 2024 if n_hours >= 8784 else 2023
+    months = np.zeros(n_hours, dtype=int)
+    hours_of_day = np.zeros(n_hours, dtype=int)
+    for h in range(n_hours):
+        hours_of_day[h] = h % 24
+        d = datetime(year, 1, 1) + pd.Timedelta(days=h // 24)
+        months[h] = d.month
+    in_comfort = ((data >= lux_min) & (data <= lux_max)).mean(axis=1) * 100
+    hour_range = list(range(hour_min, hour_max + 1))
+    matrix = np.full((len(hour_range), 12), np.nan)
+    for mi, month in enumerate(range(1, 13)):
+        for hi, hour in enumerate(hour_range):
+            mask = (months == month) & (hours_of_day == hour)
+            if mask.sum() > 0:
+                matrix[hi, mi] = in_comfort[mask].mean()
+    return matrix, hour_range
+
+matrix_c, hour_range_c = compute_temporal_comfort(ILL_CAL_480)
+month_labels_en = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+fig, ax = plt.subplots(figsize=(7.0, 3.6))
+boundaries = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+cmap = plt.cm.get_cmap('RdYlGn', len(boundaries) - 1)
+norm = mcolors.BoundaryNorm(boundaries, cmap.N)
+im = ax.imshow(matrix_c, aspect='auto', cmap=cmap, norm=norm, origin='lower',
+               extent=[-0.5, 11.5, hour_range_c[0] - 0.5, hour_range_c[-1] + 0.5])
+ax.set_yticks(hour_range_c)
+ax.set_yticklabels([str(h) for h in hour_range_c], fontsize=6)
+ax.set_xticks(range(12)); ax.set_xticklabels(month_labels_en, fontsize=6)
+ax.set_ylabel('Hour of day', fontsize=8); ax.set_xlabel('Month', fontsize=8)
+ax.invert_yaxis()  # mañana arriba → tarde abajo
+# Colorbar horizontal abajo (igual que los demás mapas).
+plt.tight_layout(rect=[0, 0.12, 1, 1])
+cbar_ax = fig.add_axes([0.25, 0.05, 0.5, 0.025])
+cb = fig.colorbar(im, cax=cbar_ax, orientation='horizontal', ticks=boundaries[::2])
+cb.set_label('% of area in 300–2000 lx', fontsize=8)
+cb.ax.tick_params(labelsize=6)
+fig.savefig(IMG_PAPER / 'comfort_temporal_calibrated.png', dpi=300, bbox_inches='tight')
+plt.show()
+```
+
+### Perfil diario promedio
+
+Colapsando los meses: para cada hora (08:00–18:00), % medio anual del área en
+confort (300–2000 lux), con banda de ±1σ entre días.
+
+```{python}
+#| label: fig-confort-daily
+#| fig-cap: "Perfil diario: % medio anual de área en 300–2000 lux por hora, ±1σ entre días (modelo calibrado)."
+#| echo: false
+
+data_c = parse_annual_ill_file(ILL_CAL_480)
+n_c = data_c.shape[0]
+hod = np.array([h % 24 for h in range(n_c)])
+in_comfort_t = ((data_c >= 300) & (data_c <= 2000)).mean(axis=1) * 100  # % área por timestep
+
+hrs_d = list(range(8, 19))                       # 08:00–18:00
+mean_d = np.array([in_comfort_t[hod == h].mean() for h in hrs_d])
+std_d = np.array([in_comfort_t[hod == h].std() for h in hrs_d])
+
+fig, ax = plt.subplots(figsize=(7.0, 3.2))
+ax.plot(hrs_d, mean_d, 'o-', color='tab:green', lw=2, ms=6, label='Annual mean')
+ax.fill_between(hrs_d, np.clip(mean_d - std_d, 0, 100), np.clip(mean_d + std_d, 0, 100),
+                color='tab:green', alpha=0.22, label='±1 std (days)')
+ax.set_xlabel('Hour', fontsize=8)
+ax.set_ylabel('% of area in 300–2000 lx', fontsize=8)
+ax.set_xticks(hrs_d); ax.set_ylim(0, 100); ax.set_yticks(range(0, 101, 20))
+ax.tick_params(labelsize=6); ax.grid(alpha=0.3); ax.legend(fontsize=7)
+plt.tight_layout()
+fig.savefig(IMG_PAPER / 'comfort_daily_calibrated.png', dpi=300, bbox_inches='tight')
+plt.show()
+```
+
+### Mapa horario anual (carpet plot)
+
+Sin agregar por mes: cada celda es el % de área en confort (300–2000 lux) en un
+día y hora concretos del año. Las rachas verticales corresponden a días nublados.
+
+```{python}
+#| label: fig-confort-annual
+#| fig-cap: "Carpet plot: % de área en 300–2000 lux por día del año y hora (08:00–18:00), modelo calibrado."
+#| echo: false
+
+n_a = data_c.shape[0]
+n_days = n_a // 24
+year_a = 2024 if n_a >= 8784 else 2023
+
+hrs_a = list(range(8, 19))
+carpet = np.full((len(hrs_a), n_days), np.nan)
+for di in range(n_days):
+    for hi, h in enumerate(hrs_a):
+        idx = di * 24 + h
+        if idx < n_a:
+            carpet[hi, di] = in_comfort_t[idx]
+
+month_mids = [(datetime(year_a, m, 15) - datetime(year_a, 1, 1)).days for m in range(1, 13)]
+
+def _carpet(boundaries, savename):
+    fig, ax = plt.subplots(figsize=(7.2, 3.2))
+    cmap = plt.cm.get_cmap('RdYlGn', len(boundaries) - 1)
+    norm = mcolors.BoundaryNorm(boundaries, cmap.N)
+    im = ax.imshow(carpet, aspect='auto', cmap=cmap, norm=norm, origin='lower',
+                   extent=[-0.5, n_days - 0.5, hrs_a[0] - 0.5, hrs_a[-1] + 0.5])
+    ax.set_yticks(hrs_a); ax.set_yticklabels([str(h) for h in hrs_a], fontsize=6)
+    ax.set_ylabel('Hour of day', fontsize=8)
+    ax.invert_yaxis()  # mañana arriba → tarde abajo
+
+    # Estaciones (hemisferio norte) por día exacto.
+    bnd = {s: (datetime(year_a, mm, dd) - datetime(year_a, 1, 1)).days
+           for s, (mm, dd) in [('spring', (3, 20)), ('summer', (6, 20)),
+                                ('autumn', (9, 22)), ('winter', (12, 21))]}
+    for b in bnd.values():                       # separadores gruesos y visibles
+        ax.axvline(b - 0.5, color='0.10', lw=1.8)
+    # Eje inferior: mes
+    ax.set_xticks(month_mids)
+    ax.set_xticklabels(month_labels_en, fontsize=6)
+    ax.set_xlabel('Month', fontsize=8)
+    ax.tick_params(axis='x', length=0)
+    # Eje superior: estaciones centradas en cada bloque
+    seg_mids = [bnd['spring'] / 2,
+                (bnd['spring'] + bnd['summer']) / 2,
+                (bnd['summer'] + bnd['autumn']) / 2,
+                (bnd['autumn'] + bnd['winter']) / 2]
+    secax = ax.secondary_xaxis('top')
+    secax.set_xticks(seg_mids)
+    secax.set_xticklabels(['Winter', 'Spring', 'Summer', 'Autumn'], fontsize=7)
+    secax.tick_params(length=0)
+    plt.tight_layout(rect=[0, 0.12, 1, 1])
+    cbar_ax = fig.add_axes([0.25, 0.05, 0.5, 0.025])
+    cb = fig.colorbar(im, cax=cbar_ax, orientation='horizontal', ticks=boundaries)
+    cb.set_label('% of area in 300–2000 lx', fontsize=8)
+    cb.ax.tick_params(labelsize=6)
+    fig.savefig(IMG_PAPER / savename, dpi=300, bbox_inches='tight')
+    plt.show()
+
+# Dos versiones: bandas de 10 % y de 20 %.
+_carpet(list(range(0, 101, 10)), 'comfort_annual_hourly_calibrated_10pct.png')
+_carpet(list(range(0, 101, 20)), 'comfort_annual_hourly_calibrated_20pct.png')
+```
+
+---
+
+# Factor de Luz Día — heliodón vs. simulación {#sec-fld}
+
+Comparación del **Factor de Luz Día (FLD / Daylight Factor)** entre el **modelo a
+escala en heliodón** (medido) y la **simulación**, sobre la misma malla de 6 × 6
+puntos (filas A–F en profundidad, columnas 1–6 transversales) y para **dos fechas
+/ horas** (una por renglón). El FLD es la razón iluminancia interior / exterior,
+en %. Orientación coherente con los demás mapas: **VENTANA-NORTE a la izquierda**
+(fila A) y **VENTANA-SUR a la derecha** (fila F); el muro OESTE corresponde a la
+columna 1. Las cuatro sub-figuras comparten niveles, colormap y colorbar para que
+la comparación sea directa.
+
+> Nota: esta malla no comparte la rejilla métrica de la simulación anual, por lo
+> que los ejes usan los rótulos de la malla (A–F, 1–6) en lugar de metros.
+
+```{python}
+#| label: fig-fld
+#| fig-cap: "Factor de Luz Día [%]: heliodón (medido) vs. simulación, por fecha/hora (renglones). Malla 6×6 (Norte→Sur en profundidad, Oeste→Este transversal). Niveles y colorbar comunes."
+#| echo: false
+
+# Filas A–F = profundidad (A junto a ventana norte, F junto a ventana sur).
+# Columnas 1–6 = transversal (col 1 = muro oeste).
+mar_helio = np.array([
+    [2.0, 2.3, 1.9, 2.4, 1.9, 1.4],  # A (norte)
+    [2.0, 1.8, 2.3, 1.9, 2.0, 1.7],  # B
+    [2.5, 2.3, 2.7, 2.3, 2.5, 1.9],  # C
+    [3.6, 3.1, 3.6, 3.0, 3.0, 2.6],  # D
+    [3.8, 3.8, 4.4, 3.7, 3.6, 2.9],  # E
+    [4.5, 4.6, 5.8, 5.0, 4.7, 3.0],  # F (sur)
+])
+mar_sim = np.array([
+    [1.6, 1.9, 1.9, 1.9, 1.6, 1.2],  # A (norte)
+    [1.4, 1.6, 1.6, 1.6, 1.4, 1.3],  # B
+    [1.6, 1.8, 1.9, 1.8, 1.6, 1.4],  # C
+    [2.0, 2.4, 2.5, 2.3, 2.0, 1.5],  # D
+    [2.7, 3.5, 3.7, 3.5, 2.7, 1.6],  # E
+    [3.6, 5.5, 5.6, 5.4, 4.0, 1.2],  # F (sur)
+])
+jun_helio = np.array([
+    [8.0, 8.3, 7.6, 7.9, 5.2, 5.2],  # A (norte)
+    [5.9, 6.0, 6.9, 5.4, 5.5, 5.3],  # B
+    [5.7, 5.4, 5.6, 5.1, 5.3, 5.1],  # C
+    [5.2, 5.1, 5.8, 4.9, 5.1, 4.9],  # D
+    [5.9, 5.8, 7.0, 5.5, 5.5, 5.1],  # E
+    [5.9, 7.2, 7.6, 6.1, 5.7, 4.7],  # F (sur)
+])
+jun_sim = np.array([
+    [4.9, 5.8, 6.2, 5.6, 4.3, 2.9],  # A (norte)
+    [2.6, 2.6, 2.7, 2.5, 2.3, 2.1],  # B
+    [2.2, 2.2, 2.2, 2.2, 2.0, 1.9],  # C
+    [2.1, 2.2, 2.3, 2.1, 1.9, 1.8],  # D
+    [2.4, 2.7, 2.7, 2.5, 2.1, 1.7],  # E
+    [2.8, 3.8, 3.5, 3.2, 2.5, 1.3],  # F (sur)
+])
+rows_lab = ['A', 'B', 'C', 'D', 'E', 'F']   # profundidad: norte → sur
+cols_lab = ['1', '2', '3', '4', '5', '6']   # transversal: oeste → este
+
+# Ejes índice: x = profundidad (norte a la izquierda), y = transversal.
+depth_idx = np.arange(6)                       # 0..5  ↔  A..F
+width_idx = np.arange(6)                        # 0..5  ↔  1..6
+DX, WY = np.meshgrid(depth_idx, width_idx)      # contourf espera Z con forma (n_width, n_depth)
+
+# Niveles/colormap/colorbar comunes a las cuatro sub-figuras (jun llega a 8.3 %).
+B = list(np.arange(1.0, 8.5, 0.5))              # niveles de FLD [%]
+LB = [2.0, 4.0, 6.0, 8.0]                       # niveles rotulados en los contornos
+col_titles = ['Heliodon', 'Simulation']
+date_rows = [('March 21, 13:00', mar_helio, mar_sim),
+             ('June 30, 15:00', jun_helio, jun_sim)]
+
+fig, axes = plt.subplots(2, 2, figsize=(7.0, 6.8), sharex=True, sharey=True)
+cf = None
+for r, (date, helio, sim) in enumerate(date_rows):
+    for c, grid in enumerate([helio, sim]):
+        ax = axes[r, c]
+        cf = ax.contourf(DX, WY, grid.T, levels=B, cmap='jet')
+        cs = ax.contour(DX, WY, grid.T, levels=B, colors='black', linewidths=0.4)
+        ax.clabel(cs, LB, inline=True, fontsize=5, fmt=lambda v: f"{v:.0f}")
+        ax.set_aspect('equal')
+        if r == 0:
+            ax.set_title(col_titles[c], fontsize=8)
+    axes[r, 0].set_ylabel(date, fontsize=8)
+for ax in axes.flat:
+    ax.set_xticks(depth_idx); ax.set_yticks(width_idx)
+for ax in axes[-1, :]:
+    ax.set_xticklabels(rows_lab, fontsize=6)
+for ax in axes[:, 0]:
+    ax.set_yticklabels(cols_lab, fontsize=6)
+plt.tight_layout(rect=[0, 0.09, 1, 1])
+cbar_ax = fig.add_axes([0.25, 0.04, 0.5, 0.018])
+cb = fig.colorbar(cf, cax=cbar_ax, orientation='horizontal', ticks=[1, 2, 3, 4, 5, 6, 7, 8])
+cb.set_label('Daylight Factor [%]', fontsize=8)
+cb.ax.tick_params(labelsize=6)
+fig.savefig(IMG_PAPER / 'Fig_DF-H-S.png', dpi=300, bbox_inches='tight')
+plt.show()
+```
+
+---
+
+# Resumen {#sec-resumen}
+
+```{python}
+#| label: summary
+#| echo: false
+
+m_jun = compute_metrics(exp_jun, sim_jun)
+m_nov = compute_metrics(exp_nov, sim_nov)
+print("=" * 64)
+print("VALIDACIÓN — RESUMEN")
+print("=" * 64)
+print(f"\nMetodología: calibración en junio (mín GOF) → validación en noviembre")
+print(f"             → evaluación anual (UDI + confort).")
+print(f"\nParámetros calibrados: τ={CAL_TAU}, ρ_floor={CAL_RF}, ρ_hall={CAL_RH}")
+print(f"\n  26 jun (calibración):  NMBE={m_jun['nmbe']:+6.2f}%  NMAE={m_jun['nmae']:6.2f}%  "
+      f"CV(RMSE)={m_jun['cvrmse']:6.2f}%  R²={m_jun['r2']:.3f}  GOF={m_jun['gof']:6.2f}%")
+print(f"  20 nov (validación):   NMBE={m_nov['nmbe']:+6.2f}%  NMAE={m_nov['nmae']:6.2f}%  "
+      f"CV(RMSE)={m_nov['cvrmse']:6.2f}%  R²={m_nov['r2']:.3f}  GOF={m_nov['gof']:6.2f}%")
+print(f"\nConvención: NMBE > 0 ⇒ la simulación sobreestima.")
+print(f"UDI_useful y el mapa de confort se reportan sobre la rejilla de 480 puntos.")
+```
